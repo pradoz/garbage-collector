@@ -1,0 +1,16 @@
+cmake_minimum_required(VERSION 3.10)
+project(simple_gc C)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic -Werror)
+endif()
+
+add_library(simple_gc src/simple_gc.c)
+target_include_directories(simple_gc PUBLIC include)
+
+enable_testing()
+add_subdirectory(test)
