@@ -1,2 +1,5 @@
 build
-tests/CMake*
+test/CMakeFiles
+test/CTestTestfile.cmake
+test/Makefile
+test/cmake_install.cmake
