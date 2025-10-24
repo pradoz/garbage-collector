@@ -54,10 +54,20 @@ bool simple_gc_init(gc_t* gc, size_t init_capacity) {
     return false;
   }
 
+  // GC context
   gc->objects = NULL;
   gc->object_count = 0;
   gc->heap_used = 0;
   gc->heap_capacity = init_capacity;
+
+  // roots
+  gc->root_capacity = 16;
+  gc->root_count = 0;
+  gc->roots = (void**) malloc(sizeof(void*) * gc->root_capacity);
+
+  if (!gc->roots) {
+    return false;
+  }
 
   return true;
 }
@@ -79,6 +89,10 @@ void simple_gc_destroy(gc_t* gc) {
   gc->objects = NULL;
   gc->object_count = 0;
   gc->heap_used = 0;
+  free(gc->roots);
+  gc->roots = NULL;
+  gc->root_count = 0;
+  gc->root_capacity = 0;
 }
 
 size_t simple_gc_object_count(const gc_t* gc) {
@@ -142,4 +156,38 @@ obj_header_t *simple_gc_find_header(gc_t *gc, void *ptr) {
   }
 
   return NULL;
+}
+
+bool simple_gc_add_root(gc_t *gc, void *ptr) {
+  if (!gc || !ptr) {
+    return false;
+  }
+
+  obj_header_t* header = simple_gc_find_header(gc, ptr);
+  if (!header) {
+    return false;
+  }
+
+  // check if we need to resize
+  if (gc->root_count >= gc->root_capacity) {
+    size_t new_capacity = gc->root_capacity * 2 + 1;
+    void** new_roots = (void**) realloc(gc->roots, new_capacity * sizeof(void*));
+    if (!new_roots) {
+      return false;
+    }
+
+    gc->roots = new_roots;
+    gc->root_capacity = new_capacity;
+  }
+
+  gc->roots[gc->root_count++] = ptr;
+
+  return true;
+}
+
+bool simple_gc_remove_root(gc_t *gc, void *ptr) {
+  if (!gc || !ptr) {
+    return false;
+  }
+  return false;
 }
