@@ -189,5 +189,18 @@ bool simple_gc_remove_root(gc_t *gc, void *ptr) {
   if (!gc || !ptr) {
     return false;
   }
-  return false;
+
+  // find the root
+  for (size_t i = 0; i < gc->root_count; ++i) {
+    if (gc->roots[i] == ptr) {
+      // shift all elements after, overwriting what we want to remove
+      for (size_t j = i; j < gc->root_count - 1; ++j) {
+        gc->roots[i] = gc->roots[j + 1];
+      }
+      // update and return found
+      gc->root_count--;
+      return true;
+    }
+  }
+  return false;  // not found
 }
