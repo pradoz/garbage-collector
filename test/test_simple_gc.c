@@ -66,7 +66,7 @@ static MunitResult test_gc_new(const MunitParameter params[], void *data) {
   (void)data;
 
   // vanilla case
-  gc_t* gc = simple_gc_new(1024);
+  gc_t *gc = simple_gc_new(1024);
   munit_assert_not_null(gc);
   munit_assert_size(simple_gc_object_count(gc), ==, 0);
   munit_assert_size(simple_gc_heap_capacity(gc), ==, 1024);
@@ -83,64 +83,249 @@ static MunitResult test_gc_new(const MunitParameter params[], void *data) {
   return MUNIT_OK;
 }
 
-static MunitResult test_gc_init(const MunitParameter params[], void* data) {
-    (void)params;
-    (void)data;
+static MunitResult test_gc_init(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
 
-    gc_t gc;
+  gc_t gc;
 
-    bool result = simple_gc_init(&gc, 1024);
-    munit_assert_true(result);
-    munit_assert_size(simple_gc_object_count(&gc), ==, 0);
-    munit_assert_size(simple_gc_heap_capacity(&gc), ==, 1024);
+  bool result = simple_gc_init(&gc, 1024);
+  munit_assert_true(result);
+  munit_assert_size(simple_gc_object_count(&gc), ==, 0);
+  munit_assert_size(simple_gc_heap_capacity(&gc), ==, 1024);
 
-    // clean up
-    simple_gc_destroy(&gc);
+  // clean up
+  simple_gc_destroy(&gc);
 
-    // invalid GC
-    result = simple_gc_init(NULL, 1024);
-    munit_assert_false(result);
+  // invalid GC
+  result = simple_gc_init(NULL, 1024);
+  munit_assert_false(result);
 
-    // no capacity
-    result = simple_gc_init(&gc, 0);
-    munit_assert_false(result);
+  // no capacity
+  result = simple_gc_init(&gc, 0);
+  munit_assert_false(result);
 
-    return MUNIT_OK;
+  return MUNIT_OK;
 }
 
-static MunitResult test_gc_object_count(const MunitParameter params[], void* data) {
+static MunitResult test_gc_object_count(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  gc_t gc;
+  simple_gc_init(&gc, 1024);
+
+  munit_assert_size(simple_gc_object_count(&gc), ==, 0);
+  munit_assert_size(simple_gc_object_count(NULL), ==, 0);
+  simple_gc_destroy(&gc);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_gc_heap_capacity(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  // null GC
+  munit_assert_size(simple_gc_heap_capacity(NULL), ==, 0);
+
+  // allocate w/ capacity
+  gc_t gc;
+  simple_gc_init(&gc, 1024);
+  munit_assert_size(simple_gc_heap_capacity(&gc), ==, 1024);
+
+  // free
+  simple_gc_destroy(&gc);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_gc_heap_used(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  // null GC
+  munit_assert_size(simple_gc_heap_used(NULL), ==, 0);
+
+  // allocate empty GC
+  gc_t gc;
+  simple_gc_init(&gc, 1024);
+  munit_assert_size(simple_gc_heap_used(&gc), ==, 0);
+
+  // free
+  simple_gc_destroy(&gc);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_gc_alloc(const MunitParameter params[], void* data) {
     (void)params;
     (void)data;
 
     gc_t gc;
     simple_gc_init(&gc, 1024);
 
-    // Initial count should be 0
-    munit_assert_size(simple_gc_object_count(&gc), ==, 0);
+    // Remember initial usage
+    size_t initial_used = simple_gc_heap_used(&gc);
 
-    // Test null gc
-    munit_assert_size(simple_gc_object_count(NULL), ==, 0);
+    // Calculate expected size
+    size_t expected_size = sizeof(obj_header_t) + sizeof(int);
 
-    // Clean up
+    // Allocate an integer
+    int* obj = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    munit_assert_not_null(obj);
+    munit_assert_size(simple_gc_object_count(&gc), ==, 1);
+
+    // Verify exact heap usage increase
+    munit_assert_size(simple_gc_heap_used(&gc) - initial_used, ==, expected_size);
+
+    // Test that we can use the allocated memory without segfaulting
+    *obj = 42;
+    munit_assert_int(*obj, ==, 42);
+
+    // Verify object header is accessible and correctly initialized
+    obj_header_t* header = simple_gc_find_header(&gc, obj);
+    munit_assert_not_null(header);
+    munit_assert_size(header->size, ==, sizeof(int));
+    munit_assert_int(header->type, ==, OBJ_TYPE_PRIMITIVE);
+
+    // Allocate an object that requires more memory - this tests that allocation size scales correctly
+    char* big_obj = (char*)simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 100);
+    munit_assert_not_null(big_obj);
+
+    // Try to write to the whole allocated region - this will crash if not enough memory was allocated
+    for (size_t i = 0; i < 100; i++) {
+        big_obj[i] = (char)i;
+    }
+
+    // Read back values to verify memory integrity
+    for (size_t i = 0; i < 100; i++) {
+        munit_assert_int(big_obj[i], ==, (char)i);
+    }
+
+    // allocation should fail with null GC
+    void* result = simple_gc_alloc(NULL, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    munit_assert_null(result);
+
+    // allocate more no capacity
+    result = simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, 0);
+    munit_assert_null(result);
+
+    // allocate more than available capacity
+    result = simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 2000);
+    munit_assert_null(result);
+
+    // free
     simple_gc_destroy(&gc);
 
     return MUNIT_OK;
 }
 
-static MunitResult test_gc_heap_capacity(const MunitParameter params[], void* data) {
+static MunitResult test_gc_alloc_boundary(const MunitParameter params[], void* data) {
     (void)params;
     (void)data;
 
     gc_t gc;
     simple_gc_init(&gc, 1024);
 
-    // Initial capacity should be 1024
-    munit_assert_size(simple_gc_heap_capacity(&gc), ==, 1024);
+    // allocate an array with a known pattern
+    size_t arr_size = 32;
+    int* arr = (int*)simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, arr_size * sizeof(int));
+    munit_assert_not_null(arr);
 
-    // Test null gc
-    munit_assert_size(simple_gc_heap_capacity(NULL), ==, 0);
+    // fill with a recognizable pattern
+    for (size_t i = 0; i < arr_size; i++) {
+        arr[i] = 0xDEADBEEF + (int)i;
+    }
 
-    // Clean up
+    // verify all elements match the expected pattern
+    for (size_t i = 0; i < arr_size; i++) {
+        munit_assert_int(arr[i], ==, 0xDEADBEEF + (int)i);
+    }
+
+    // verify the header size is correct
+    obj_header_t* header = simple_gc_find_header(&gc, arr);
+    munit_assert_not_null(header);
+    munit_assert_size(header->size, ==, arr_size * sizeof(int));
+
+    // free
+    simple_gc_destroy(&gc);
+
+    return MUNIT_OK;
+}
+
+static MunitResult test_gc_alloc_stress(const MunitParameter params[], void* data) {
+    (void)params;
+    (void)data;
+
+    gc_t gc;
+    size_t capacity = 1024 * 1024; // 1MB
+    simple_gc_init(&gc, capacity);
+
+    // allocate objects until nearly full
+    void* objects[100];
+    size_t count = 0;
+    size_t sizes[] = {8, 16, 32, 64, 128, 256, 512, 1024};
+
+    for (size_t i = 0; i < 100; i++) {
+        size_t size = sizes[i % (sizeof(sizes)/sizeof(sizes[0]))];
+        objects[count] = simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, size);
+
+        if (objects[count] == NULL) {
+            break; // heap is full
+        }
+
+        // fill allocated memory with a pattern
+        memset(objects[count], (int)i, size);
+        count++;
+    }
+
+    // verify allocated objects are accessible and contain the expected pattern
+    for (size_t i = 0; i < count; i++) {
+        size_t size = sizes[i % (sizeof(sizes) / sizeof(sizes[0]))];
+        unsigned char* ptr = (unsigned char*)objects[i];
+
+        for (size_t j = 0; j < size; j++) {
+            munit_assert_int(ptr[j], ==, (unsigned char)i);
+        }
+    }
+
+    // free
+    simple_gc_destroy(&gc);
+
+    return MUNIT_OK;
+}
+
+static MunitResult test_gc_find_header(const MunitParameter params[], void* data) {
+    (void)params;
+    (void)data;
+
+    gc_t gc;
+    simple_gc_init(&gc, 1024);
+
+    // allocate an integer
+    int* obj = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+
+    // find the object header
+    obj_header_t* header = simple_gc_find_header(&gc, obj);
+    munit_assert_not_null(header);
+    munit_assert_int(header->type, ==, OBJ_TYPE_PRIMITIVE);
+    munit_assert_size(header->size, ==, sizeof(int));
+
+    // null GC
+    header = simple_gc_find_header(NULL, obj);
+    munit_assert_null(header);
+
+    // null object ptr
+    header = simple_gc_find_header(&gc, NULL);
+    munit_assert_null(header);
+
+    // invalid object pointer
+    int nope;
+    header = simple_gc_find_header(&gc, &nope);
+    munit_assert_null(header);
+
+    // free
     simple_gc_destroy(&gc);
 
     return MUNIT_OK;
@@ -154,6 +339,12 @@ static MunitTest tests[] = {
     {"/gc_init", test_gc_init, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_object_count", test_gc_object_count, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_heap_capacity", test_gc_heap_capacity, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/gc_heap_used", test_gc_heap_used, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/gc_alloc", test_gc_alloc, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/gc_alloc_boundary", test_gc_alloc_boundary, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/gc_alloc_stress", test_gc_alloc_stress, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/gc_find_header", test_gc_find_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    // {"/gc_root_management", test_gc_root_management, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}};
 
 static const MunitSuite suite = {"/simple_gc", tests, NULL, 1,
