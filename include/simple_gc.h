@@ -37,17 +37,35 @@ typedef struct gc_context {
 } gc_t;
 
 const char *simple_gc_version(void);
+
+// object header management
 bool simple_gc_init_header(obj_header_t *header, obj_type_t type, size_t size);
 bool simple_gc_is_valid_header(const obj_header_t *header);
+
+// GC initialization/cleanup
 gc_t *simple_gc_new(size_t init_capacity);
 bool simple_gc_init(gc_t *gc, size_t init_capacity);
 void simple_gc_destroy(gc_t *gc);
+
+// GC stats
 size_t simple_gc_object_count(const gc_t *gc);
 size_t simple_gc_heap_capacity(const gc_t *gc);
 size_t simple_gc_heap_used(const gc_t *gc);
+
+// memory allocation/object management
 void *simple_gc_alloc(gc_t *gc, obj_type_t type, size_t size);
 obj_header_t *simple_gc_find_header(gc_t *gc, void *ptr);
 bool simple_gc_add_root(gc_t *gc, void *ptr);
 bool simple_gc_remove_root(gc_t *gc, void *ptr);
+
+// TODO: move to utils?
+bool simple_gc_is_root(gc_t *gc, void *ptr);
+
+// mark and sweep
+void simple_gc_mark(gc_t *gc, void *ptr);
+void simple_gc_mark_roots(gc_t *gc);
+void simple_gc_sweep(gc_t *gc);
+void simple_gc_collect(gc_t *gc);
+
 
 #endif /* SIMPLE_GC_H */

@@ -380,6 +380,147 @@ static MunitResult test_gc_root_management(const MunitParameter params[], void* 
     return MUNIT_OK;
 }
 
+static MunitResult test_gc_mark(const MunitParameter params[], void* data) {
+    (void)params;
+    (void)data;
+
+    gc_t gc;
+    simple_gc_init(&gc, 1024);
+
+    // allocate objects
+    int* obj1 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    int* obj2 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    int* obj3 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+
+    // initially, all objects should be unmarked
+    obj_header_t* header1 = simple_gc_find_header(&gc, obj1);
+    obj_header_t* header2 = simple_gc_find_header(&gc, obj2);
+    obj_header_t* header3 = simple_gc_find_header(&gc, obj3);
+    munit_assert_false(header1->marked);
+    munit_assert_false(header2->marked);
+    munit_assert_false(header3->marked);
+
+    // mark obj1 and obj2
+    simple_gc_mark(&gc, obj1);
+    simple_gc_mark(&gc, obj2);
+
+    // only obj1 and obj2 should be marked
+    munit_assert_true(header1->marked);
+    munit_assert_true(header2->marked);
+    munit_assert_false(header3->marked);
+
+    // free
+    simple_gc_destroy(&gc);
+
+    return MUNIT_OK;
+}
+
+static MunitResult test_gc_mark_roots(const MunitParameter params[], void* data) {
+    (void)params;
+    (void)data;
+
+    gc_t gc;
+    simple_gc_init(&gc, 1024);
+
+    int* obj1 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    int* obj2 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    int* obj3 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+
+    // add obj1 and obj3 to root array
+    simple_gc_add_root(&gc, obj1);
+    simple_gc_add_root(&gc, obj3);
+
+    simple_gc_mark_roots(&gc);
+
+    // verify obj1 and obj3 are marked
+    obj_header_t* header1 = simple_gc_find_header(&gc, obj1);
+    obj_header_t* header2 = simple_gc_find_header(&gc, obj2);
+    obj_header_t* header3 = simple_gc_find_header(&gc, obj3);
+
+    munit_assert_true(header1->marked);
+    munit_assert_false(header2->marked);
+    munit_assert_true(header3->marked);
+
+    // free
+    simple_gc_destroy(&gc);
+
+    return MUNIT_OK;
+}
+
+static MunitResult test_gc_sweep(const MunitParameter params[], void* data) {
+    (void)params;
+    (void)data;
+
+    gc_t gc;
+    simple_gc_init(&gc, 1024);
+
+    int* obj1 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    int* obj2 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    int* obj3 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+
+    munit_assert_size(simple_gc_object_count(&gc), ==, 3);
+
+    // mark obj1 and obj3
+    obj_header_t* header1 = simple_gc_find_header(&gc, obj1);
+    obj_header_t* header3 = simple_gc_find_header(&gc, obj3);
+    simple_gc_mark(&gc, obj1);
+    simple_gc_mark(&gc, obj3);
+
+    // only obj1 and obj2 should be marked
+    munit_assert_true(header1->marked);
+    munit_assert_true(header3->marked);
+
+    // sweep should remove obj2
+    simple_gc_sweep(&gc);
+    munit_assert_size(simple_gc_object_count(&gc), ==, 2);
+
+    // obj1 and obj3 still exist and are unmarked
+    header1 = simple_gc_find_header(&gc, obj1);
+    header3 = simple_gc_find_header(&gc, obj3);
+
+    munit_assert_not_null(header1);
+    munit_assert_not_null(header3);
+    munit_assert_false(header1->marked);
+    munit_assert_false(header3->marked);
+
+    // obj2 should be swept
+    munit_assert_null(simple_gc_find_header(&gc, obj2));
+
+    // free
+    simple_gc_destroy(&gc);
+
+    return MUNIT_OK;
+}
+
+static MunitResult test_gc_collect(const MunitParameter params[], void* data) {
+    (void)params;
+    (void)data;
+
+    gc_t gc;
+    simple_gc_init(&gc, 1024);
+
+    int* obj1 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    int* obj2 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    int* obj3 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+
+    // add obj1 to root array
+    simple_gc_add_root(&gc, obj1);
+    munit_assert_size(simple_gc_object_count(&gc), ==, 3);
+
+    simple_gc_collect(&gc);
+
+    // obj2 and obj3 should be collected
+    munit_assert_size(simple_gc_object_count(&gc), ==, 1);
+    munit_assert_not_null(simple_gc_find_header(&gc, obj1));
+    munit_assert_null(simple_gc_find_header(&gc, obj2));
+    munit_assert_null(simple_gc_find_header(&gc, obj3));
+
+    // free
+    simple_gc_destroy(&gc);
+
+    return MUNIT_OK;
+}
+
 static MunitTest tests[] = {
     {"/version", test_version, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/init_header", test_init_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
@@ -394,10 +535,13 @@ static MunitTest tests[] = {
     {"/gc_alloc_stress", test_gc_alloc_stress, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_find_header", test_gc_find_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_root_management", test_gc_root_management, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/gc_mark", test_gc_mark, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/gc_mark_roots", test_gc_mark_roots, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/gc_sweep", test_gc_sweep, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/gc_collect", test_gc_collect, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}};
 
-static const MunitSuite suite = {"/simple_gc", tests, NULL, 1,
-                                 MUNIT_SUITE_OPTION_NONE};
+static const MunitSuite suite = {"/simple_gc", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};
 
 int main(int argc, char *argv[]) {
   return munit_suite_main(&suite, NULL, argc, argv);

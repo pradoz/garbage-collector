@@ -9,7 +9,7 @@ $(BUILD_DIR):
 	@mkdir -p $(BUILD_DIR)
 
 test: all
-	@cd $(BUILD_DIR) && ctest --output-on-failure
+	@cd $(BUILD_DIR) && ctest -V
 
 clean:
 	@rm -rf $(BUILD_DIR)
