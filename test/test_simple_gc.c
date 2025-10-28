@@ -329,6 +329,34 @@ static MunitResult test_gc_find_header(const MunitParameter params[], void* data
     return MUNIT_OK;
 }
 
+static MunitResult test_gc_is_root(const MunitParameter params[], void* data) {
+    (void)params;
+    (void)data;
+
+    gc_t gc;
+    simple_gc_init(&gc, 1024);
+
+    // add objects to root array
+    int* obj1 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    int* obj2 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+
+    bool result = simple_gc_add_root(&gc, obj1);
+    munit_assert_true(result);
+
+    // obj1 is the root
+    result = simple_gc_is_root(&gc, obj1);
+    munit_assert_true(result);
+
+    // obj2 is _not_ the root
+    result = simple_gc_is_root(&gc, obj2);
+    munit_assert_false(result);
+
+    // free
+    simple_gc_destroy(&gc);
+
+    return MUNIT_OK;
+}
+
 static MunitResult test_gc_root_management(const MunitParameter params[], void* data) {
     (void)params;
     (void)data;
@@ -799,6 +827,7 @@ static MunitTest tests[] = {
     {"/gc_alloc_boundary", test_gc_alloc_boundary, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_alloc_stress", test_gc_alloc_stress, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_find_header", test_gc_find_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/gc_is_root", test_gc_is_root, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_root_management", test_gc_root_management, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_mark", test_gc_mark, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_mark_roots", test_gc_mark_roots, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
