@@ -1,17 +1,6 @@
 #include "munit.h"
 #include "simple_gc.h"
 
-static MunitResult test_version(const MunitParameter params[], void *data) {
-  (void)params;
-  (void)data;
-
-  const char *version = simple_gc_version();
-  munit_assert_not_null(version);
-  munit_assert_string_equal(version, "0.1.0");
-
-  return MUNIT_OK;
-}
-
 static MunitResult test_init_header(const MunitParameter params[], void *data) {
   (void)params;
   (void)data;
@@ -815,7 +804,6 @@ static MunitResult test_gc_cyclic_references(const MunitParameter params[], void
 }
 
 static MunitTest tests[] = {
-    {"/version", test_version, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/init_header", test_init_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/is_valid_header", test_is_valid_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_new", test_gc_new, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},

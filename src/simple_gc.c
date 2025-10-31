@@ -1,5 +1,6 @@
 #include "simple_gc.h"
 #include "gc_platform.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 
@@ -46,7 +47,14 @@ static void update_heap_bounds(gc_t *gc, void *ptr, size_t size) {
 }
 
 
-const char *simple_gc_version(void) { return "0.1.0"; }
+const char *simple_gc_version(void) {
+  static char version_string[32]; // Buffer size large enough for "M.m.p"
+
+  snprintf(version_string, sizeof(version_string), "%d.%d.%d",
+      SIMPLE_GC_VERSION_MAJOR, SIMPLE_GC_VERSION_MINOR, SIMPLE_GC_VERSION_PATCH);
+
+  return version_string;
+}
 
 bool simple_gc_init_header(obj_header_t *header, obj_type_t type, size_t size) {
   if (!header || size == 0) {
