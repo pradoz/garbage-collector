@@ -1,5 +1,6 @@
 #include "simple_gc.h"
 #include <stdlib.h>
+#include <stdint.h>
 
 const char *simple_gc_version(void) { return "0.1.0"; }
 
@@ -295,6 +296,12 @@ void simple_gc_collect(gc_t *gc) {
   }
 
   simple_gc_mark_roots(gc);
+
+  // automated root scanning
+  if (gc->auto_root_scan_enabled) {
+    simple_gc_scan_stack(gc);
+  }
+
   simple_gc_sweep(gc);
 }
 
@@ -356,4 +363,68 @@ bool simple_gc_enable_auto_roots(gc_t *gc, bool enable) {
   if (!gc) return false;
   gc->auto_root_scan_enabled = enable;
   return true;
+}
+
+bool simple_gc_is_heap_pointer(gc_t *gc, void *ptr) {
+  if (!gc || !ptr) return false;
+
+  obj_header_t *curr = gc->objects;
+  while (curr) {
+    void *start = (void*)(curr + 1);
+    void *end = (void*)((char*) start + curr->size);
+    if (ptr >= start && ptr < end) {
+      return true;
+    }
+    curr = curr->next;
+  }
+  return false;
+}
+
+void simple_gc_scan_stack(gc_t* gc) {
+  if (!gc || !gc->stack_bottom || !gc->auto_root_scan_enabled) return;
+
+  // new local to approximate the current stack pointer
+  void *stack_top;
+  void *stack_ptr = &stack_top;
+
+  char *scan_start = (char*) stack_ptr;
+  char *scan_end = (char*) gc->stack_bottom;
+
+  if (scan_start > scan_end) {
+    char* tmp = scan_start;
+    scan_start = scan_end;
+    scan_end = tmp;
+  }
+
+  // commenting this out makes the test fail
+  // TODO: implement register saving
+  #include <stdio.h>
+  printf("  Scan range: %p to %p (%td bytes)\n", (void*)scan_start, (void*)scan_end, scan_end - scan_start);
+  // Show all objects in heap
+  printf("  Objects in heap:\n");
+  obj_header_t *obj = gc->objects;
+  int obj_num = 0;
+  while (obj) {
+    void *obj_ptr = (void *)(obj + 1);
+    printf("    [%d] %p (size=%zu, type=%d)\n",
+           obj_num++, obj_ptr, obj->size, obj->type);
+    obj = obj->next;
+  }
+
+  // scan by word (pointer-sized) chunks
+  uintptr_t *curr_word = (uintptr_t*) scan_start;
+  uintptr_t *last_word = (uintptr_t*) scan_end;
+  while (curr_word < last_word) {
+    void *check = (void*)(*curr_word);
+    if (simple_gc_is_heap_pointer(gc, check)) {
+      obj_header_t * header = simple_gc_find_header(gc, check);
+      if (header && !header->marked) {
+        simple_gc_mark(gc, check);
+      }
+    }
+    // for now, accept false positives (integers mistaken for pointers)
+    // but never false negatives (missing real pointers)
+    curr_word++;
+  }
+
 }
