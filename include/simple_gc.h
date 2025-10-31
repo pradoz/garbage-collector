@@ -40,6 +40,9 @@ typedef struct gc_context {
   void *stack_bottom;  // highest address (architecture assumption)
   bool auto_root_scan_enabled;
 
+  // heap bounds
+  void *heap_start;
+  void *heap_end;
 } gc_t;
 
 typedef struct reference_node {
@@ -57,6 +60,7 @@ bool simple_gc_is_valid_header(const obj_header_t *header);
 
 // GC initialization/cleanup
 gc_t *simple_gc_new(size_t init_capacity);
+gc_t *simple_gc_new_auto(size_t init_capacity);
 bool simple_gc_init(gc_t *gc, size_t init_capacity);
 void simple_gc_destroy(gc_t *gc);
 

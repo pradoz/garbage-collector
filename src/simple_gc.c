@@ -3,6 +3,22 @@
 #include <stdlib.h>
 #include <stdint.h>
 
+
+static void update_heap_bounds(gc_t *gc, void *ptr, size_t size) {
+  if (!gc || !ptr) return;
+
+  void *start = ptr;
+  void *end = (void*) ((char*) ptr + size);
+
+  if (!gc->heap_start || start < gc->heap_start) {
+    gc->heap_start = start;
+  }
+  if (!gc->heap_end || end > gc->heap_end) {
+    gc->heap_end = end;
+  }
+}
+
+
 const char *simple_gc_version(void) { return "0.1.0"; }
 
 bool simple_gc_init_header(obj_header_t *header, obj_type_t type, size_t size) {
@@ -51,6 +67,21 @@ gc_t* simple_gc_new(size_t init_capacity) {
   return gc;
 }
 
+gc_t *simple_gc_new_auto(size_t init_capacity) {
+  gc_t *gc = simple_gc_new(init_capacity);
+  if (!gc) {
+    return NULL;
+  }
+
+  if (!simple_gc_auto_init_stack(gc)) {
+    simple_gc_destroy(gc);
+    free(gc);
+    return NULL;
+  }
+
+  return gc;
+}
+
 bool simple_gc_init(gc_t* gc, size_t init_capacity) {
   if (!gc || init_capacity == 0) {
     return false;
@@ -77,6 +108,10 @@ bool simple_gc_init(gc_t* gc, size_t init_capacity) {
   // stack scanning
   gc->stack_bottom = NULL;
   gc->auto_root_scan_enabled = false;
+
+  // heap bounds
+  gc->heap_start = NULL;
+  gc->heap_end = NULL;
 
   return true;
 }
@@ -156,7 +191,9 @@ void *simple_gc_alloc(gc_t *gc, obj_type_t type, size_t size) {
   gc->heap_used += total_size;
 
   // return a pointer to data after the header
-  return (void*)(header + 1);
+  void* result = (void*)(header + 1);
+  update_heap_bounds(gc, result, size);
+  return result;
 }
 
 obj_header_t *simple_gc_find_header(gc_t *gc, void *ptr) {
@@ -369,6 +406,16 @@ bool simple_gc_enable_auto_roots(gc_t *gc, bool enable) {
 bool simple_gc_is_heap_pointer(gc_t *gc, void *ptr) {
   if (!gc || !ptr) return false;
 
+  // fast boundary check
+  void *heap_start = gc->heap_start;
+  void *heap_end = gc->heap_end;
+  if (!heap_start || !heap_end) {
+    return false;
+  }
+  if (ptr < heap_start || ptr >= heap_end) {
+    return false;
+  }
+
   obj_header_t *curr = gc->objects;
   while (curr) {
     void *start = (void*)(curr + 1);
@@ -391,8 +438,9 @@ void simple_gc_scan_stack(gc_t* gc) {
   void *stack_top;
   void *stack_ptr = &stack_top;
 
-  char *scan_start = (char*) stack_ptr;
-  char *scan_end = (char*) gc->stack_bottom;
+  uintptr_t align_mask = sizeof(void *) - 1;
+  char *scan_start = (char*) (((uintptr_t) stack_ptr) & ~align_mask);
+  char *scan_end = (char*) (((uintptr_t) gc->stack_bottom) & ~align_mask);
 
   if (scan_start > scan_end) {
     char* tmp = scan_start;
