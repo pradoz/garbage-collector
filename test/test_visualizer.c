@@ -205,6 +205,7 @@ static MunitResult test_viz_snapshot(const MunitParameter params[], void *data) 
 
   gc_t gc;
   simple_gc_init(&gc, 1024);
+  gc.use_pools = false;
 
   // empty
   gc_snapshot_t *snap1 = gc_viz_snapshot(&gc);
@@ -246,6 +247,7 @@ static MunitResult test_viz_snapshot_marked_states(const MunitParameter params[]
 
   gc_t gc;
   simple_gc_init(&gc, 1024);
+  gc.use_pools = false;
 
   void *obj1 = simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
   void *obj2 = simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
@@ -278,6 +280,7 @@ static MunitResult test_viz_diff(const MunitParameter params[], void *data) {
 
   gc_t gc;
   simple_gc_init(&gc, 1024);
+  gc.use_pools = false;
   gc_viz_config_t config = gc_viz_default_config();
   config.use_colors = false;
 

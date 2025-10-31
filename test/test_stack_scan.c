@@ -97,6 +97,7 @@ static MunitResult test_heap_pointer_detection(const MunitParameter params[], vo
 
   gc_t gc;
   simple_gc_init(&gc, 1024);
+  gc.use_pools = false;
 
   int *obj1 = (int *)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
   int *obj2 = (int *)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));

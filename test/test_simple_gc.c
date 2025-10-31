@@ -152,6 +152,7 @@ static MunitResult test_gc_alloc(const MunitParameter params[], void* data) {
 
     gc_t gc;
     simple_gc_init(&gc, 1024);
+    gc.use_pools = false;
 
     // memo initial usage
     size_t initial_used = simple_gc_heap_used(&gc);
@@ -214,6 +215,7 @@ static MunitResult test_gc_alloc_boundary(const MunitParameter params[], void* d
 
     gc_t gc;
     simple_gc_init(&gc, 1024);
+    gc.use_pools = false;
 
     // allocate an array with a known pattern
     size_t arr_size = 32;
@@ -289,6 +291,7 @@ static MunitResult test_gc_find_header(const MunitParameter params[], void* data
 
     gc_t gc;
     simple_gc_init(&gc, 1024);
+    gc.use_pools = false;
 
     // allocate an integer
     int* obj = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
@@ -324,6 +327,7 @@ static MunitResult test_gc_is_root(const MunitParameter params[], void* data) {
 
     gc_t gc;
     simple_gc_init(&gc, 1024);
+    gc.use_pools = false;
 
     // add objects to root array
     int* obj1 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
@@ -352,6 +356,7 @@ static MunitResult test_gc_root_management(const MunitParameter params[], void* 
 
     gc_t gc;
     simple_gc_init(&gc, 1024);
+    gc.use_pools = false;
 
     // add objects to root array
     int* obj1 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
@@ -403,6 +408,7 @@ static MunitResult test_gc_mark(const MunitParameter params[], void* data) {
 
     gc_t gc;
     simple_gc_init(&gc, 1024);
+    gc.use_pools = false;
 
     // allocate objects
     int* obj1 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
@@ -438,6 +444,7 @@ static MunitResult test_gc_mark_roots(const MunitParameter params[], void* data)
 
     gc_t gc;
     simple_gc_init(&gc, 1024);
+    gc.use_pools = false;
 
     int* obj1 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
     int* obj2 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
@@ -470,6 +477,7 @@ static MunitResult test_gc_sweep(const MunitParameter params[], void* data) {
 
     gc_t gc;
     simple_gc_init(&gc, 1024);
+    gc.use_pools = false;
 
     int* obj1 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
     int* obj2 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
@@ -515,6 +523,7 @@ static MunitResult test_gc_collect(const MunitParameter params[], void* data) {
 
     gc_t gc;
     simple_gc_init(&gc, 1024);
+    gc.use_pools = false;
 
     int* obj1 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
     int* obj2 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
@@ -544,6 +553,7 @@ static MunitResult test_gc_add_reference(const MunitParameter params[], void* da
 
     gc_t gc;
     simple_gc_init(&gc, 1024);
+    gc.use_pools = false;
 
     int* obj1 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
     int* obj2 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
@@ -589,6 +599,7 @@ static MunitResult test_gc_array_references(const MunitParameter params[], void*
 
     gc_t gc;
     simple_gc_init(&gc, 1024);
+    gc.use_pools = false;
 
     int** array = (int**)simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 3 * sizeof(int*));
     int* elem1 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
@@ -639,6 +650,7 @@ static MunitResult test_gc_struct_references(const MunitParameter params[], void
 
     gc_t gc;
     simple_gc_init(&gc, 1024);
+    gc.use_pools = false;
 
     TestStruct* test_obj = (TestStruct*)simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, sizeof(TestStruct));
     double* value = (double*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(double));
@@ -688,6 +700,7 @@ static MunitResult test_gc_complex_reference_graph(const MunitParameter params[]
 
     gc_t gc;
     simple_gc_init(&gc, 1024);
+    gc.use_pools = false;
 
     void* a = simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, 16);
     void* b = simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, 16);
@@ -753,6 +766,7 @@ static MunitResult test_gc_cyclic_references(const MunitParameter params[], void
 
     gc_t gc;
     simple_gc_init(&gc, 1024);
+    gc.use_pools = false;
 
     void* a = simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, 16);
     void* b = simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, 16);
