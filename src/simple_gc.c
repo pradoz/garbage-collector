@@ -69,6 +69,9 @@ bool simple_gc_init(gc_t* gc, size_t init_capacity) {
     return false;
   }
 
+  // refs
+  gc->references = NULL;
+
   return true;
 }
 
@@ -78,10 +81,18 @@ void simple_gc_destroy(gc_t* gc) {
   }
 
   // free gc objects
-  obj_header_t* curr = gc->objects;
-  while (curr) {
-    obj_header_t* tmp = curr;
-    curr = curr->next;
+  obj_header_t* obj = gc->objects;
+  while (obj) {
+    obj_header_t* tmp = obj;
+    obj = obj->next;
+    free(tmp);
+  }
+
+  // free references
+  ref_node_t* ref = gc->references;
+  while (ref) {
+    ref_node_t* tmp = ref;
+    ref = ref->next;
     free(tmp);
   }
 
@@ -93,6 +104,7 @@ void simple_gc_destroy(gc_t* gc) {
   gc->roots = NULL;
   gc->root_count = 0;
   gc->root_capacity = 0;
+  gc->references = NULL;
 }
 
 size_t simple_gc_object_count(const gc_t* gc) {
@@ -229,12 +241,15 @@ void simple_gc_mark(gc_t *gc, void *ptr) {
     return;
   }
 
-  // header is reachable
+  // object is reachable
   header->marked = true;
 
-  if (header->type == OBJ_TYPE_ARRAY || header->type == OBJ_TYPE_STRUCT) {
-    // TODO: traverse object references
-
+  ref_node_t* ref = gc->references;
+  while (ref) {
+    if (ref->from_obj == ptr) {
+      simple_gc_mark(gc, ref->to_obj);
+    }
+    ref = ref->next;
   }
 }
 
@@ -277,4 +292,46 @@ void simple_gc_collect(gc_t *gc) {
 
   simple_gc_mark_roots(gc);
   simple_gc_sweep(gc);
+}
+
+bool simple_gc_add_reference(gc_t *gc, void *from_ptr, void *to_ptr) {
+  if (!gc || !from_ptr || !to_ptr) {
+    return false;
+  }
+
+  if (!simple_gc_find_header(gc, from_ptr) || !simple_gc_find_header(gc, to_ptr)) {
+    return false;
+  }
+
+  ref_node_t* ref = (ref_node_t*) malloc(sizeof(ref_node_t));
+  if (!ref) {
+    return false;
+  }
+
+  ref->from_obj = from_ptr;
+  ref->to_obj = to_ptr;
+
+  ref->next = gc->references;
+  gc->references = ref;
+
+  return true;
+}
+
+bool simple_gc_remove_reference(gc_t *gc, void *from_ptr, void *to_ptr) {
+  if (!gc || !from_ptr || !to_ptr) {
+    return false;
+  }
+
+  ref_node_t** curr = &gc->references;
+  while (*curr) {
+    ref_node_t* ref = *curr;
+    if (ref->from_obj == from_ptr && ref->to_obj == to_ptr) {
+      *curr = ref->next;
+      free(ref);
+      return true;
+    }
+    curr = &(*curr)->next;
+  }
+
+  return false;
 }

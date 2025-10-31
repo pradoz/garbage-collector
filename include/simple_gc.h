@@ -11,6 +11,7 @@
 
 typedef struct obj_header obj_header_t;
 typedef struct gc_context gc_t;
+typedef struct reference_node ref_node_t;
 
 typedef enum {
   OBJ_TYPE_UNKNOWN = 0,
@@ -34,7 +35,15 @@ typedef struct gc_context {
   void **roots; // array of root pointers
   size_t root_count;
   size_t root_capacity;
+  ref_node_t *references;
 } gc_t;
+
+typedef struct reference_node {
+  void *from_obj;
+  void *to_obj;
+  struct reference_node *next;
+} ref_node_t;
+
 
 const char *simple_gc_version(void);
 
@@ -66,6 +75,10 @@ void simple_gc_mark(gc_t *gc, void *ptr);
 void simple_gc_mark_roots(gc_t *gc);
 void simple_gc_sweep(gc_t *gc);
 void simple_gc_collect(gc_t *gc);
+
+// ref counting
+bool simple_gc_add_reference(gc_t *gc, void *from_ptr, void *to_ptr);
+bool simple_gc_remove_reference(gc_t *gc, void *from_ptr, void *to_ptr);
 
 
 #endif /* SIMPLE_GC_H */
