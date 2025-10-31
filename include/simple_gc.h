@@ -135,5 +135,18 @@ bool simple_gc_is_heap_pointer(gc_t *gc, void *ptr);
 void simple_gc_scan_stack(gc_t* gc);
 bool simple_gc_auto_init_stack(gc_t *gc);
 
+// memory pools
+int gc_size_to_class(size_t size);
+size_class_t* gc_get_size_class(gc_t *gc, size_t size);
+pool_block_t* gc_create_pool_block(size_t slot_size, size_t capacity);
+void* gc_alloc_from_block(pool_block_t *block, obj_type_t type, size_t size);
+void* gc_alloc_from_size_class(gc_t *gc, size_class_t* sc, obj_type_t type, size_t size);
+void* gc_alloc_large(gc_t *gc, obj_type_t type, size_t size);
+bool gc_init_size_class(size_class_t *sc, size_t object_size);
+bool gc_init_pools(gc_t *gc);
+void gc_free_pool_block(pool_block_t *block);
+void gc_destroy_size_class(size_class_t *sc);
+void gc_destroy_pools(gc_t* gc);
+
 
 #endif /* SIMPLE_GC_H */

@@ -1,5 +1,6 @@
 #include "simple_gc.h"
 #include "gc_platform.h"
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -15,22 +16,141 @@ const size_t GC_SIZE_CLASS_SIZES[GC_NUM_SIZE_CLASSES] = {
   256   // large (beyond this = large object)
 };
 
-static int gc_size_to_class(size_t size) {
+int gc_size_to_class(size_t size) {
   for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
-    if (size >= GC_SIZE_CLASS_SIZES[i]) {
+    if (size <= GC_SIZE_CLASS_SIZES[i]) {
       return i;
     }
   }
   return -1; // too big for the pool
 }
 
-// static size_class_t* gc_get_size_class(gc_t *gc, size_t size) {
-//   int class_index = gc_size_to_class(size);
-//   if (class_index < 0) {
-//     return NULL;
-//   }
-//   return &gc->size_classes[class_index];
-// }
+size_class_t* gc_get_size_class(gc_t *gc, size_t size) {
+  int class_index = gc_size_to_class(size);
+  if (class_index < 0) {
+    return NULL;
+  }
+  return &gc->size_classes[class_index];
+}
+
+pool_block_t* gc_create_pool_block(size_t slot_size, size_t capacity) {
+  if (slot_size == 0 || capacity == 0) return NULL;
+
+  pool_block_t* block = (pool_block_t*) malloc(sizeof(pool_block_t));
+  if (!block) return NULL;
+
+  size_t total_size = slot_size * capacity;
+  block->memory = malloc(total_size);
+  if (!block->memory) {
+    free(block);
+    return NULL;
+  }
+
+  block->slot_size = slot_size;
+  block->capacity = capacity;
+  block->used = 0;
+  block->next = NULL;
+
+  /* Memory layout (e.g., 4 slots of 32 bytes each):
+    when slot_size=32, capacity=4; block->memory:
+    addr:   0x1000    0x1020    0x1040    0x1060
+          |─────────┬─────────┬─────────┬──────────┐
+          | Slot 0  │ Slot 1  │ Slot 2  │ Slot 3   │
+          | next─┐  │ next─┐  │ next─┐  │ next=NULL│
+          |──────v──┴─|────v──┴─|────v──┴─|────────┘
+                 └────^    └────^    └────^
+  */
+  block->free_list = (free_node_t*) block->memory;
+  char *slot = (char*) block->memory;
+  for (size_t i = 0; i < capacity - 1; ++i) {
+    free_node_t *node = (free_node_t*) slot;
+    slot += slot_size;
+    node->next = (free_node_t*) slot;
+  }
+
+  free_node_t *last = (free_node_t*) slot;
+  last->next = NULL;
+  return block;
+}
+
+void* gc_alloc_from_block(pool_block_t *block, obj_type_t type, size_t size) {
+  if (!block || !block->free_list) return NULL;
+
+  // pop from free list
+  free_node_t *node = block->free_list;
+  block->free_list = node->next;
+  block->used++;
+
+  // node becomes the new object header
+  obj_header_t *header = (obj_header_t*) node;
+  if (!simple_gc_init_header(header, type, size)) {
+    node->next = block->free_list;
+    block->free_list = node;
+    block->used--;
+    return NULL;
+  }
+
+  return (void*)(header + 1);
+}
+
+void* gc_alloc_from_size_class(gc_t *gc, size_class_t* sc, obj_type_t type, size_t size) {
+  if (!gc || !sc) return NULL;
+
+  // try to allocate from existing blocks
+  pool_block_t *block = sc->blocks;
+  while (block) {
+    if (block->free_list) {
+      void *ptr = gc_alloc_from_block(block, type, size);
+      if (ptr) {
+        sc->total_used++;
+        sc->total_allocated++;
+        return ptr;
+      }
+    }
+    block = block->next;
+  }
+
+  // no space in existing blocks; create a new block
+  size_t slots_per_block = GC_POOL_BLOCK_SIZE / sc->slot_size;
+  if (slots_per_block < 1) {
+    slots_per_block = 1;
+  }
+
+  pool_block_t *new_block = gc_create_pool_block(sc->slot_size, slots_per_block);
+  if (!new_block) return NULL;
+
+  // add to size class and allocate from new block
+  new_block->next = sc->blocks;
+  sc->blocks = new_block;
+  sc->total_capacity += new_block->capacity;
+
+  void *ptr = gc_alloc_from_block(new_block, type, size);
+  if (ptr) {
+    sc->total_used++;
+    sc->total_allocated++;
+  }
+
+  return ptr;
+}
+
+void* gc_alloc_large(gc_t *gc, obj_type_t type, size_t size) {
+  if (!gc || size == 0) return NULL;
+
+  size_t total_size = sizeof(obj_header_t) + size;
+  obj_header_t *header = (obj_header_t*) malloc(total_size);
+
+  if (!header) return NULL;
+  if (!simple_gc_init_header(header, type, size)) {
+    free(header);
+    return NULL;
+  }
+
+  header->next = gc->large_objects;
+  gc->large_objects = header;
+  gc->large_object_count++;
+
+  return (void*)(header + 1);
+}
 
 static void update_heap_bounds(gc_t *gc, void *ptr, size_t size) {
   if (!gc || !ptr) return;
@@ -117,7 +237,7 @@ gc_t *simple_gc_new_auto(size_t init_capacity) {
   return gc;
 }
 
-static bool gc_init_size_class(size_class_t *sc, size_t object_size) {
+bool gc_init_size_class(size_class_t *sc, size_t object_size) {
   if (!sc) return false;
 
   // initialize a single size class
@@ -131,7 +251,7 @@ static bool gc_init_size_class(size_class_t *sc, size_t object_size) {
   return true;
 }
 
-static bool gc_init_pools(gc_t *gc) {
+bool gc_init_pools(gc_t *gc) {
   if (!gc) return false;
 
   // initialize all size classes
@@ -188,7 +308,7 @@ bool simple_gc_init(gc_t* gc, size_t init_capacity) {
   return true;
 }
 
-static void gc_free_pool_block(pool_block_t *block) {
+void gc_free_pool_block(pool_block_t *block) {
   if (!block) return;
 
   if (block->memory) {
@@ -197,7 +317,7 @@ static void gc_free_pool_block(pool_block_t *block) {
   free(block);
 }
 
-static void gc_destroy_size_class(size_class_t *sc) {
+void gc_destroy_size_class(size_class_t *sc) {
   if (!sc) return;
 
   pool_block_t *block = sc->blocks;
@@ -215,7 +335,7 @@ static void gc_destroy_size_class(size_class_t *sc) {
   sc->total_used = 0;
 }
 
-static void gc_destroy_pools(gc_t* gc) {
+void gc_destroy_pools(gc_t* gc) {
   if (!gc) return;
   for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
     gc_destroy_size_class(&gc->size_classes[i]);
@@ -292,28 +412,40 @@ void *simple_gc_alloc(gc_t *gc, obj_type_t type, size_t size) {
     return NULL;
   }
 
-  // allocate total memory for object+header
-  obj_header_t* header = (obj_header_t*) malloc(total_size);
-  if (!header) {
-    return NULL;
+  void *result = NULL;
+
+  if (gc->use_pools) {
+    size_class_t *sc = gc_get_size_class(gc, size);
+    if (sc) {
+      result = gc_alloc_from_size_class(gc, sc, type, size);
+    } else {
+      result = gc_alloc_large(gc, type, size);
+    }
+  } else {  // fall back to malloc-based allocation
+    // allocate total memory for object+header
+    obj_header_t* header = (obj_header_t*) malloc(total_size);
+    if (!header) {
+      return NULL;
+
+    }
+    // verify we can initialize the header
+    if (!simple_gc_init_header(header, type, size)) {
+      free(header);
+      return NULL;
+    }
+
+    header->next = gc->objects;
+    gc->objects = header;
+    result = (void*)(header + 1);
   }
 
-  // verify we can initialize the header
-  if (!simple_gc_init_header(header, type, size)) {
-    free(header);
-    return NULL;
-  }
-
-  header->next = gc->objects;
-  gc->objects = header;
 
   // bookkeeping
-  gc->object_count++;
-  gc->heap_used += total_size;
-
-  // return a pointer to data after the header
-  void* result = (void*)(header + 1);
-  update_heap_bounds(gc, result, size);
+  if (result) {
+    gc->object_count++;
+    gc->heap_used += total_size;
+    update_heap_bounds(gc, result, size);
+  }
   return result;
 }
 
