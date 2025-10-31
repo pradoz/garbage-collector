@@ -521,6 +521,150 @@ static MunitResult test_gc_collect(const MunitParameter params[], void* data) {
     return MUNIT_OK;
 }
 
+static MunitResult test_gc_add_reference(const MunitParameter params[], void* data) {
+    (void)params;
+    (void)data;
+
+    gc_t gc;
+    simple_gc_init(&gc, 1024);
+
+    int* obj1 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    int* obj2 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+
+    bool result = simple_gc_add_reference(&gc, obj1, obj2);
+    munit_assert_true(result);
+
+    // NULL GC
+    result = simple_gc_add_reference(NULL, obj1, obj2);
+    munit_assert_false(result);
+
+    // NULL from pointer
+    result = simple_gc_add_reference(&gc, NULL, obj2);
+    munit_assert_false(result);
+
+    // NULL to pointer
+    result = simple_gc_add_reference(&gc, obj1, NULL);
+    munit_assert_false(result);
+
+    // invalid pointers; not managed by GC
+    int not_gc_obj;
+    result = simple_gc_add_reference(&gc, &not_gc_obj, obj2);
+    munit_assert_false(result);
+    result = simple_gc_add_reference(&gc, obj1, &not_gc_obj);
+    munit_assert_false(result);
+
+    // remove reference between existing objects
+    result = simple_gc_remove_reference(&gc, obj1, obj2);
+    munit_assert_true(result);
+
+    // remove non-existent reference
+    result = simple_gc_remove_reference(&gc, obj2, obj1);
+    munit_assert_false(result);
+
+    // free
+    simple_gc_destroy(&gc);
+    return MUNIT_OK;
+}
+
+static MunitResult test_gc_array_references(const MunitParameter params[], void* data) {
+    (void)params;
+    (void)data;
+
+    gc_t gc;
+    simple_gc_init(&gc, 1024);
+
+    int** array = (int**)simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 3 * sizeof(int*));
+    int* elem1 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    int* elem2 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    int* elem3 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+
+    *elem1 = 111;
+    *elem2 = 222;
+    *elem3 = 333;
+    array[0] = elem1;
+    array[1] = elem2;
+    array[2] = elem3;
+
+    simple_gc_add_reference(&gc, array, elem1);
+    simple_gc_add_reference(&gc, array, elem2);
+    simple_gc_add_reference(&gc, array, elem3);
+
+    // add array as root
+    simple_gc_add_root(&gc, array);
+    munit_assert_size(simple_gc_object_count(&gc), ==, 4);
+
+    // run garbage collection
+    simple_gc_collect(&gc);
+    munit_assert_size(simple_gc_object_count(&gc), ==, 4);
+    munit_assert_int(*elem1, ==, 111);
+    munit_assert_int(*elem2, ==, 222);
+    munit_assert_int(*elem3, ==, 333);
+
+    // remove array from roots; should also remove references
+    simple_gc_remove_root(&gc, array);
+    simple_gc_collect(&gc);
+    munit_assert_size(simple_gc_object_count(&gc), ==, 0);
+
+    // free
+    simple_gc_destroy(&gc);
+    return MUNIT_OK;
+}
+
+typedef struct {
+    int id;
+    double* value;
+    char* name;
+} TestStruct;
+
+static MunitResult test_gc_struct_references(const MunitParameter params[], void* data) {
+    (void)params;
+    (void)data;
+
+    gc_t gc;
+    simple_gc_init(&gc, 1024);
+
+    TestStruct* test_obj = (TestStruct*)simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, sizeof(TestStruct));
+    double* value = (double*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(double));
+    char* name = (char*)simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 20 * sizeof(char));
+
+    test_obj->id = 42;
+    test_obj->value = value;
+    test_obj->name = name;
+
+    *value = 3.14159;
+    strcpy(name, "Test Object");
+
+    simple_gc_add_reference(&gc, test_obj, value);
+    simple_gc_add_reference(&gc, test_obj, name);
+    simple_gc_add_root(&gc, test_obj);
+    munit_assert_size(simple_gc_object_count(&gc), ==, 3);
+
+    // run garbage collection
+    simple_gc_collect(&gc);
+
+    // all objects should still exist because TestStruct references them
+    munit_assert_size(simple_gc_object_count(&gc), ==, 3);
+    munit_assert_int(test_obj->id, ==, 42);
+    munit_assert_double(*test_obj->value, ==, 3.14159);
+    munit_assert_string_equal(test_obj->name, "Test Object");
+
+    // remove one reference then run GC
+    simple_gc_remove_reference(&gc, test_obj, name);
+    simple_gc_collect(&gc);
+
+    // object should be collected, but its value should still exist
+    munit_assert_size(simple_gc_object_count(&gc), ==, 2);
+
+    // remove TestStruct from roots then run GC; all objects should be collected
+    simple_gc_remove_root(&gc, test_obj);
+    simple_gc_collect(&gc);
+    munit_assert_size(simple_gc_object_count(&gc), ==, 0);
+
+    // free
+    simple_gc_destroy(&gc);
+    return MUNIT_OK;
+}
+
 static MunitTest tests[] = {
     {"/version", test_version, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/init_header", test_init_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
@@ -539,6 +683,9 @@ static MunitTest tests[] = {
     {"/gc_mark_roots", test_gc_mark_roots, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_sweep", test_gc_sweep, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_collect", test_gc_collect, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/gc_add_reference", test_gc_add_reference, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/gc_array_references", test_gc_array_references, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/gc_struct_references", test_gc_struct_references, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}};
 
 static const MunitSuite suite = {"/simple_gc", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};
