@@ -665,6 +665,127 @@ static MunitResult test_gc_struct_references(const MunitParameter params[], void
     return MUNIT_OK;
 }
 
+static MunitResult test_gc_complex_reference_graph(const MunitParameter params[], void* data) {
+    (void)params;
+    (void)data;
+
+    gc_t gc;
+    simple_gc_init(&gc, 1024);
+
+    void* a = simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, 16);
+    void* b = simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, 16);
+    void* c = simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, 16);
+    void* d = simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, 16);
+    void* e = simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, 16);
+    munit_assert_size(simple_gc_object_count(&gc), ==, 5);
+
+    // graph representation:
+    // a -> b -> d
+    //  \     /
+    //   -> c -> e
+    simple_gc_add_root(&gc, a);
+    simple_gc_add_reference(&gc, a, b);
+    simple_gc_add_reference(&gc, a, c);
+    simple_gc_add_reference(&gc, b, d);
+    simple_gc_add_reference(&gc, c, d);
+    simple_gc_add_reference(&gc, c, e);
+
+    // run garbage collection
+    simple_gc_collect(&gc);
+
+    // no iniital collection (everything has a reference)
+    munit_assert_size(simple_gc_object_count(&gc), ==, 5);
+    munit_assert_not_null(simple_gc_find_header(&gc, a));
+    munit_assert_not_null(simple_gc_find_header(&gc, b));
+    munit_assert_not_null(simple_gc_find_header(&gc, c));
+    munit_assert_not_null(simple_gc_find_header(&gc, d));
+    munit_assert_not_null(simple_gc_find_header(&gc, e));
+
+    // break reference chain from c -> e
+    simple_gc_remove_reference(&gc, c, e);
+
+    // run garbage collection
+    simple_gc_collect(&gc);
+
+    // e is no longer referenced and should be collected
+    munit_assert_size(simple_gc_object_count(&gc), ==, 4);
+    munit_assert_not_null(simple_gc_find_header(&gc, a));
+    munit_assert_not_null(simple_gc_find_header(&gc, b));
+    munit_assert_not_null(simple_gc_find_header(&gc, c));
+    munit_assert_not_null(simple_gc_find_header(&gc, d));
+    munit_assert_null(simple_gc_find_header(&gc, e));
+
+    // remove the root
+    simple_gc_remove_root(&gc, a);
+
+    // run garbage collection
+    simple_gc_collect(&gc);
+
+    // everything should be collected
+    munit_assert_size(simple_gc_object_count(&gc), ==, 0);
+
+    // free
+    simple_gc_destroy(&gc);
+
+    return MUNIT_OK;
+}
+
+static MunitResult test_gc_cyclic_references(const MunitParameter params[], void* data) {
+    (void)params;
+    (void)data;
+
+    gc_t gc;
+    simple_gc_init(&gc, 1024);
+
+    void* a = simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, 16);
+    void* b = simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, 16);
+    void* c = simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, 16);
+    munit_assert_size(simple_gc_object_count(&gc), ==, 3);
+
+    /* cyclic graph:
+     *      A -> B -> C
+     *      ^        /
+     *       \      /
+     *         ----
+    */
+    simple_gc_add_reference(&gc, a, b);
+    simple_gc_add_reference(&gc, b, c);
+    simple_gc_add_reference(&gc, c, a);
+
+    // no roots; everything should be collected
+    simple_gc_collect(&gc);
+    munit_assert_size(simple_gc_object_count(&gc), ==, 0);
+
+    // recreate cycle with root a
+    a = simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, 16);
+    b = simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, 16);
+    c = simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, 16);
+    simple_gc_add_reference(&gc, a, b);
+    simple_gc_add_reference(&gc, b, c);
+    simple_gc_add_reference(&gc, c, a);
+    simple_gc_add_root(&gc, a);
+
+    // no iniital collection (everything has a reference)
+    simple_gc_collect(&gc);
+    munit_assert_size(simple_gc_object_count(&gc), ==, 3);
+    munit_assert_not_null(simple_gc_find_header(&gc, a));
+    munit_assert_not_null(simple_gc_find_header(&gc, b));
+    munit_assert_not_null(simple_gc_find_header(&gc, c));
+
+    // remove the root
+    simple_gc_remove_root(&gc, a);
+
+    // run garbage collection
+    simple_gc_collect(&gc);
+
+    // everything should be collected
+    munit_assert_size(simple_gc_object_count(&gc), ==, 0);
+
+    // free
+    simple_gc_destroy(&gc);
+    return MUNIT_OK;
+}
+
 static MunitTest tests[] = {
     {"/version", test_version, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/init_header", test_init_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
@@ -686,6 +807,8 @@ static MunitTest tests[] = {
     {"/gc_add_reference", test_gc_add_reference, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_array_references", test_gc_array_references, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_struct_references", test_gc_struct_references, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/gc_complex_reference_graph", test_gc_complex_reference_graph, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/gc_cyclic_references", test_gc_cyclic_references, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}};
 
 static const MunitSuite suite = {"/simple_gc", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};
