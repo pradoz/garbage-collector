@@ -100,10 +100,10 @@ void gc_viz_object_list(const gc_t *gc, const gc_viz_config_t *config) {
   size_t count = simple_gc_object_count(gc);
 
   if (config->use_colors) {
-    fprintf(out, "%sObjects%s (%zu):\n", ANSI_BOLD, ANSI_RESET, count);
+    fprintf(out, "%s\nObjects%s (%zu):\n", ANSI_BOLD, ANSI_RESET, count);
 
   } else {
-    fprintf(out, "Objects (%zu):\n", count);
+    fprintf(out, "\nObjects (%zu):\n", count);
   }
 
   if (count == 0) {
