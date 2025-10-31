@@ -384,6 +384,9 @@ bool simple_gc_is_heap_pointer(gc_t *gc, void *ptr) {
 void simple_gc_scan_stack(gc_t* gc) {
   if (!gc || !gc->stack_bottom || !gc->auto_root_scan_enabled) return;
 
+  // save registers to the stack
+  gc_platform_save_registers();
+
   // new local to approximate the current stack pointer
   void *stack_top;
   void *stack_ptr = &stack_top;
@@ -395,21 +398,6 @@ void simple_gc_scan_stack(gc_t* gc) {
     char* tmp = scan_start;
     scan_start = scan_end;
     scan_end = tmp;
-  }
-
-  // commenting this out makes the test fail
-  // TODO: implement register saving
-  #include <stdio.h>
-  printf("  Scan range: %p to %p (%td bytes)\n", (void*)scan_start, (void*)scan_end, scan_end - scan_start);
-  // Show all objects in heap
-  printf("  Objects in heap:\n");
-  obj_header_t *obj = gc->objects;
-  int obj_num = 0;
-  while (obj) {
-    void *obj_ptr = (void *)(obj + 1);
-    printf("    [%d] %p (size=%zu, type=%d)\n",
-           obj_num++, obj_ptr, obj->size, obj->type);
-    obj = obj->next;
   }
 
   // scan by word (pointer-sized) chunks

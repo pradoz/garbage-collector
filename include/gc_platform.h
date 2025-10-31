@@ -11,5 +11,7 @@
 void *gc_platform_get_stack_bottom(void);
 void *gc_platform_get_stack_pointer(void);
 
+void gc_platform_save_registers(void);
+
 
 #endif /* GC_PLATFORM_H */

@@ -2,7 +2,7 @@
 
 
 #include <pthread.h>
-#include <unistd.h>
+#include <setjmp.h>
 
 
 void *gc_platform_get_stack_bottom(void) {
@@ -29,4 +29,10 @@ void *gc_platform_get_stack_pointer(void) {
   void *sp;
   void *ptr = &sp;
   return ptr;
+}
+
+void gc_platform_save_registers(void) {
+  // use setjmp to force the compiler to spill registers on the stack
+  jmp_buf registers;
+  setjmp(registers);
 }
