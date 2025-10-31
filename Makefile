@@ -1,5 +1,7 @@
 BUILD_DIR = build
 
+TESTS = test_simple_gc test_visualizer test_stack_scan
+
 .PHONY: all build test test-verbose example clean
 
 all: build
@@ -8,23 +10,22 @@ build:
 	@mkdir -p $(BUILD_DIR)
 	@cd $(BUILD_DIR) && cmake .. && $(MAKE)
 
-test:
-	@cd $(BUILD_DIR) && ctest --output-on-failure
+define run_ctest
+	@cd $(BUILD_DIR) && ctest -R $(subst -,_,$(1)) $(2)
+endef
 
-test-verbose:
-	@cd $(BUILD_DIR) && ctest -V
+test-%: build
+	$(call run_ctest,$*,--output-on-failure)
+
+test-%-verbose: build
+	$(call run_ctest,$*,-V)
+
+test: build $(addprefix test-,$(subst test_,,$(TESTS)))
+
+test-verbose: build $(addprefix test-,$(addsuffix -verbose,$(subst test_,,$(TESTS))))
 
 example: build
-	@echo "=== Running Visualizer Demo ==="
 	@./$(BUILD_DIR)/examples/visualizer_demo
 
 clean:
-	@rm -rf build
-
-help:
-	@echo "Available targets:"
-	@echo "  make build         - Build the project"
-	@echo "  make test          - Run tests (quiet visualizer tests)"
-	@echo "  make test-verbose  - Run tests with full output"
-	@echo "  make example       - Run visualizer demo"
-	@echo "  make clean         - Clean build directory"
+	@rm -rf $(BUILD_DIR)
