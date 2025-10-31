@@ -1,5 +1,7 @@
 #include "munit.h"
 #include "simple_gc.h"
+#include "gc_platform.h"
+
 
 static MunitResult test_gc_set_stack_bottom(const MunitParameter params[], void *data) {
   (void)params;
@@ -174,6 +176,65 @@ static MunitResult test_stack_scan_no_false_negatives(const MunitParameter param
   return MUNIT_OK;
 }
 
+static MunitResult test_stack_platform_detection(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  void *stack_bottom = gc_platform_get_stack_bottom();
+  void *stack_ptr = gc_platform_get_stack_pointer();
+
+  munit_assert_not_null(stack_bottom);
+  munit_assert_not_null(stack_ptr);
+
+  // stack grows downward
+  munit_assert_true(stack_bottom > stack_ptr);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_auto_init_stack(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  gc_t gc;
+  simple_gc_init(&gc, 1024);
+
+  bool result = simple_gc_auto_init_stack(&gc);
+  munit_assert_true(result);
+  munit_assert_not_null(gc.stack_bottom);
+  munit_assert_true(gc.auto_root_scan_enabled);
+
+  // free
+  simple_gc_destroy(&gc);
+  return MUNIT_OK;
+}
+
+static MunitResult test_fully_automatic_collection(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  gc_t gc;
+  simple_gc_init(&gc, 1024);
+
+  simple_gc_auto_init_stack(&gc);
+
+  // allocate objects (no manual root management)
+  int *obj1 = (int *)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+  int *obj2 = (int *)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+  *obj1 = 100;
+  *obj2 = 200;
+  munit_assert_size(simple_gc_object_count(&gc), ==, 2);
+
+  // run garbage collection; both pointers should survive
+  simple_gc_collect(&gc);
+  munit_assert_size(simple_gc_object_count(&gc), ==, 2);
+  munit_assert_int(*obj1, ==, 100);
+  munit_assert_int(*obj2, ==, 200);
+
+  // free
+  simple_gc_destroy(&gc);
+  return MUNIT_OK;
+}
 static MunitTest tests[] = {
     {"/gc_set_stack_bottom", test_gc_set_stack_bottom, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_get_stack_bottom", test_gc_get_stack_bottom, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
@@ -181,6 +242,9 @@ static MunitTest tests[] = {
     {"/gc_heap_pointer_detection", test_heap_pointer_detection, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_stack_scan_basic", test_stack_scan_basic, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_stack_scan_no_false_negatives", test_stack_scan_no_false_negatives, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/gc_stack_platform_detection", test_stack_platform_detection, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/gc_stack_auto_init", test_auto_init_stack, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/gc_stack_auto_collect", test_fully_automatic_collection, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}};
 
 static const MunitSuite suite = {"/simple_gc", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};

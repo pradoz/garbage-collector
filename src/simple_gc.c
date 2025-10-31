@@ -1,4 +1,5 @@
 #include "simple_gc.h"
+#include "gc_platform.h"
 #include <stdlib.h>
 #include <stdint.h>
 
@@ -427,4 +428,15 @@ void simple_gc_scan_stack(gc_t* gc) {
     curr_word++;
   }
 
+}
+
+bool simple_gc_auto_init_stack(gc_t *gc) {
+  if (!gc) return false;
+
+  void *stack_bottom = gc_platform_get_stack_bottom();
+  if (!stack_bottom) return false;
+
+  gc->stack_bottom = stack_bottom;
+  gc->auto_root_scan_enabled = true;
+  return true;
 }

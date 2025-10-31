@@ -90,6 +90,7 @@ void *simple_gc_get_stack_bottom(gc_t *gc);
 bool simple_gc_enable_auto_roots(gc_t *gc, bool enable);
 bool simple_gc_is_heap_pointer(gc_t *gc, void *ptr);
 void simple_gc_scan_stack(gc_t* gc);
+bool simple_gc_auto_init_stack(gc_t *gc);
 
 
 #endif /* SIMPLE_GC_H */

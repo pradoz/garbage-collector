@@ -9,12 +9,19 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 endif()
 
+find_package(Threads REQUIRED)
+
 add_library(simple_gc
   src/simple_gc.c
+  src/gc_platform.c
   src/gc_visualizer.c
 )
 
 target_include_directories(simple_gc PUBLIC include)
+
+target_link_libraries(simple_gc PRIVATE Threads::Threads)
+
+target_compile_definitions(simple_gc PRIVATE _GNU_SOURCE)
 
 enable_testing()
 add_subdirectory(test)
