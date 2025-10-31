@@ -15,6 +15,13 @@ typedef struct {
 
 gc_viz_config_t gc_viz_default_config(void);
 
+// utils
+const char *gc_viz_type_string(obj_type_t type);
+void gc_viz_separator(const gc_viz_config_t *config, char c, int width);
+void gc_viz_clear_screen(void);
+
+void gc_viz_heap_bar(const gc_t *gc, const gc_viz_config_t *config);
+void gc_viz_object_list(const gc_t *gc, const gc_viz_config_t *config);
 
 
 
