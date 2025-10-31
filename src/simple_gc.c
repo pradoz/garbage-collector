@@ -4,6 +4,33 @@
 #include <stdint.h>
 
 
+// object sizes (excluding header)
+const size_t GC_SIZE_CLASS_SIZES[GC_NUM_SIZE_CLASSES] = {
+  8,    // booleans, small numbers
+  16,   // pointers, small structs
+  32,   // sh-medium
+  64,   // medium
+  128,  // medium-large
+  256   // large (beyond this = large object)
+};
+
+static int gc_size_to_class(size_t size) {
+  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
+    if (size >= GC_SIZE_CLASS_SIZES[i]) {
+      return i;
+    }
+  }
+  return -1; // too big for the pool
+}
+
+// static size_class_t* gc_get_size_class(gc_t *gc, size_t size) {
+//   int class_index = gc_size_to_class(size);
+//   if (class_index < 0) {
+//     return NULL;
+//   }
+//   return &gc->size_classes[class_index];
+// }
+
 static void update_heap_bounds(gc_t *gc, void *ptr, size_t size) {
   if (!gc || !ptr) return;
 
@@ -82,6 +109,37 @@ gc_t *simple_gc_new_auto(size_t init_capacity) {
   return gc;
 }
 
+static bool gc_init_size_class(size_class_t *sc, size_t object_size) {
+  if (!sc) return false;
+
+  // initialize a single size class
+  sc->size = object_size;
+  sc->slot_size = sizeof(obj_header_t) + object_size;
+  sc->blocks = NULL;
+  sc->total_capacity = 0;
+  sc->total_used = 0;
+  sc->total_allocated = 0;
+
+  return true;
+}
+
+static bool gc_init_pools(gc_t *gc) {
+  if (!gc) return false;
+
+  // initialize all size classes
+  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
+    if (!gc_init_size_class(&gc->size_classes[i], GC_SIZE_CLASS_SIZES[i])) {
+      return false;
+    }
+  }
+
+  gc->use_pools = true;
+  gc->large_objects = NULL;
+  gc->large_object_count = 0;
+
+  return true;
+}
+
 bool simple_gc_init(gc_t* gc, size_t init_capacity) {
   if (!gc || init_capacity == 0) {
     return false;
@@ -113,12 +171,67 @@ bool simple_gc_init(gc_t* gc, size_t init_capacity) {
   gc->heap_start = NULL;
   gc->heap_end = NULL;
 
+  // memory pools
+  if (!gc_init_pools(gc)) {
+    free(gc->roots);
+    return false;
+  }
+
   return true;
+}
+
+static void gc_free_pool_block(pool_block_t *block) {
+  if (!block) return;
+
+  if (block->memory) {
+    free(block->memory);
+  }
+  free(block);
+}
+
+static void gc_destroy_size_class(size_class_t *sc) {
+  if (!sc) return;
+
+  pool_block_t *block = sc->blocks;
+  while (block) {
+    pool_block_t *old = block;
+    block = block->next;
+    gc_free_pool_block(old);
+    // pool_block_t *next = block->next;
+    // gc_free_pool_block(block);
+    // block = next;
+  }
+
+  sc->blocks = NULL;
+  sc->total_capacity = 0;
+  sc->total_used = 0;
+}
+
+static void gc_destroy_pools(gc_t* gc) {
+  if (!gc) return;
+  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
+    gc_destroy_size_class(&gc->size_classes[i]);
+  }
+
+  obj_header_t *curr = gc->large_objects;
+  while (curr) {
+    obj_header_t *old = curr;
+    curr = curr->next;
+    free(old);
+  }
+
+  gc->large_objects = NULL;
+  gc->large_object_count = 0;
 }
 
 void simple_gc_destroy(gc_t* gc) {
   if (!gc) {
     return;
+  }
+
+  // free memory pools
+  if (gc->use_pools) {
+    gc_destroy_pools(gc);
   }
 
   // free gc objects

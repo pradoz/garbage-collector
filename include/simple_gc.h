@@ -5,13 +5,24 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// versioning
 #define SIMPLE_GC_VERSION_MAJOR 0
-#define SIMPLE_GC_VERSION_MINOR 1
+#define SIMPLE_GC_VERSION_MINOR 2
 #define SIMPLE_GC_VERSION_PATCH 0
+
+// memory pools
+#define GC_NUM_SIZE_CLASSES 6
+#define GC_POOL_BLOCK_SIZE 4096  // 4KB blocks
+                                 //
+
+extern const size_t GC_SIZE_CLASS_SIZES[GC_NUM_SIZE_CLASSES];
+
 
 typedef struct obj_header obj_header_t;
 typedef struct gc_context gc_t;
 typedef struct reference_node ref_node_t;
+typedef struct size_class size_class_t;
+
 
 typedef enum {
   OBJ_TYPE_UNKNOWN = 0,
@@ -26,6 +37,28 @@ typedef struct obj_header {
   bool marked;
   obj_header_t *next;
 } obj_header_t;
+
+typedef struct free_node {
+  struct free_node *next;
+} free_node_t;
+
+typedef struct pool_block {
+  void *memory;
+  size_t slot_size;
+  size_t capacity;
+  size_t used;
+  free_node_t *free_list;
+  struct pool_block *next;
+} pool_block_t;
+
+typedef struct size_class {
+  size_t size;
+  size_t slot_size;
+  pool_block_t *blocks;
+  size_t total_capacity;
+  size_t total_used;
+  size_t total_allocated;
+} size_class_t;
 
 typedef struct gc_context {
   obj_header_t *objects; // linked-list
@@ -43,6 +76,12 @@ typedef struct gc_context {
   // heap bounds
   void *heap_start;
   void *heap_end;
+
+  // memory pools
+  size_class_t size_classes[GC_NUM_SIZE_CLASSES];
+  bool use_pools;
+  obj_header_t *large_objects; // large objects are too big for pools
+  size_t large_object_count;
 } gc_t;
 
 typedef struct reference_node {
