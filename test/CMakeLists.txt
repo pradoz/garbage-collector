@@ -10,3 +10,16 @@ target_include_directories(test_simple_gc PRIVATE
 
 target_link_libraries(test_simple_gc simple_gc)
 add_test(NAME test_simple_gc COMMAND test_simple_gc)
+
+add_executable(test_visualizer
+  munit/munit.c
+  test_visualizer.c
+)
+
+target_include_directories(test_visualizer PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/munit
+  ${CMAKE_SOURCE_DIR}/include
+)
+
+target_link_libraries(test_visualizer simple_gc)
+add_test(NAME test_visualizer COMMAND test_visualizer)

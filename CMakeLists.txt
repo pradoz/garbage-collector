@@ -9,7 +9,10 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 endif()
 
-add_library(simple_gc src/simple_gc.c)
+add_library(simple_gc
+  src/simple_gc.c
+  src/gc_visualizer.c
+)
 target_include_directories(simple_gc PUBLIC include)
 
 enable_testing()
