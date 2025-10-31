@@ -194,6 +194,123 @@ static MunitResult test_viz_full_state(const MunitParameter params[], void *data
   return MUNIT_OK;
 }
 
+static MunitResult test_viz_snapshot(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  // null things
+  gc_snapshot_t *snap_null = gc_viz_snapshot(NULL);
+  munit_assert_null(snap_null);
+  gc_viz_free_snapshot(NULL);
+
+  gc_t gc;
+  simple_gc_init(&gc, 1024);
+
+  // empty
+  gc_snapshot_t *snap1 = gc_viz_snapshot(&gc);
+  munit_assert_not_null(snap1);
+  munit_assert_size(snap1->object_count, ==, 0);
+  munit_assert_size(snap1->heap_used, ==, 0);
+
+  // with objects
+  void *obj1 = simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+  void *obj2 = simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 100);
+
+  gc_snapshot_t *snap2 = gc_viz_snapshot(&gc);
+  munit_assert_not_null(snap2);
+  munit_assert_size(snap2->object_count, ==, 2);
+  munit_assert_true(snap2->heap_used > 0);
+  munit_assert_not_null(snap2->object_ptrs);
+  munit_assert_not_null(snap2->marked_states);
+
+  // verify object ptrs
+  bool found1 = false, found2 = false;
+  for (size_t i = 0; i < snap2->object_count; i++) {
+    if (snap2->object_ptrs[i] == obj1) found1 = true;
+    if (snap2->object_ptrs[i] == obj2) found2 = true;
+  }
+  munit_assert_true(found1);
+  munit_assert_true(found2);
+
+  // free
+  gc_viz_free_snapshot(snap1);
+  gc_viz_free_snapshot(snap2);
+  simple_gc_destroy(&gc);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_viz_snapshot_marked_states(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  gc_t gc;
+  simple_gc_init(&gc, 1024);
+
+  void *obj1 = simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+  void *obj2 = simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+
+  // mark obj1
+  simple_gc_mark(&gc, obj1);
+
+  gc_snapshot_t *snap = gc_viz_snapshot(&gc);
+  munit_assert_not_null(snap);
+
+  // check marked states
+  for (size_t i = 0; i < snap->object_count; i++) {
+    if (snap->object_ptrs[i] == obj1) {
+      munit_assert_true(snap->marked_states[i]);
+    } else if (snap->object_ptrs[i] == obj2) {
+      munit_assert_false(snap->marked_states[i]);
+    }
+  }
+
+  // free
+  gc_viz_free_snapshot(snap);
+  simple_gc_destroy(&gc);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_viz_diff(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  gc_t gc;
+  simple_gc_init(&gc, 1024);
+  gc_viz_config_t config = gc_viz_default_config();
+  config.use_colors = false;
+
+  void *obj1 = simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+  simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 50);
+  simple_gc_add_root(&gc, obj1);
+
+  gc_snapshot_t *before = gc_viz_snapshot(&gc);
+
+  // collect; object should be removed
+  simple_gc_collect(&gc);
+
+  gc_snapshot_t *after = gc_viz_snapshot(&gc);
+
+  // snapshots should be different
+  munit_assert_size(before->object_count, ==, 2);
+  munit_assert_size(after->object_count, ==, 1);
+
+  gc_viz_diff(before, after, &config);
+
+  // null things
+  gc_viz_diff(NULL, after, &config);
+  gc_viz_diff(before, NULL, &config);
+  gc_viz_diff(before, after, NULL);
+
+  // free
+  gc_viz_free_snapshot(before);
+  gc_viz_free_snapshot(after);
+  simple_gc_destroy(&gc);
+
+  return MUNIT_OK;
+}
+
 static MunitTest tests[] = {
     {"/viz_default_config", test_viz_default_config, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/viz_type_string", test_viz_type_string, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
@@ -202,6 +319,9 @@ static MunitTest tests[] = {
     {"/viz_reference_graph", test_viz_reference_graph, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/viz_stats_dashboard", test_viz_stats_dashboard, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/viz_full_state", test_viz_full_state, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/viz_snapshot", test_viz_snapshot, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/viz_snapshot_marked", test_viz_snapshot_marked_states, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/viz_diff", test_viz_diff, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}};
 
 static const MunitSuite suite = {"/simple_gc", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};

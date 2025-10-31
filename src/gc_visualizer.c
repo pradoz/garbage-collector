@@ -242,3 +242,125 @@ void gc_viz_full_state(const gc_t *gc, const gc_viz_config_t *config) {
 
   fprintf(config->output, "\n");
 }
+
+gc_snapshot_t *gc_viz_snapshot(const gc_t *gc) {
+  if (!gc) return NULL;
+
+  gc_snapshot_t* snapshot = (gc_snapshot_t*) malloc(sizeof(gc_snapshot_t));
+  if (!snapshot) return NULL;
+
+  snapshot->object_count = gc->object_count;
+  snapshot->heap_used = gc->heap_used;
+
+  if (snapshot->object_count == 0) {
+    snapshot->object_ptrs = NULL;
+    snapshot->marked_states = NULL;
+    return snapshot;
+  }
+
+  // allocate arrays
+  snapshot->object_ptrs = (void**) malloc(sizeof(void*) * snapshot->object_count);;
+  snapshot->marked_states  = (bool*) malloc(sizeof(bool) * snapshot->object_count);;
+
+  if (!snapshot->object_ptrs || !snapshot->marked_states) {
+    gc_viz_free_snapshot(snapshot);
+    return NULL;
+  }
+
+  // copy object data
+  obj_header_t* curr = gc->objects;
+  size_t i = 0;
+  while (curr && i < snapshot->object_count) {
+    snapshot->object_ptrs[i] = (void*)(curr + 1);
+    snapshot->marked_states[i] = curr->marked;
+    curr = curr->next;
+    ++i;
+  }
+
+  return snapshot;
+}
+
+void gc_viz_free_snapshot(gc_snapshot_t *snapshot) {
+  if (!snapshot) return;
+  free(snapshot->object_ptrs);
+  free(snapshot->marked_states);
+  free(snapshot);
+}
+
+void gc_viz_diff(const gc_snapshot_t *before, const gc_snapshot_t *after, const gc_viz_config_t *config) {
+  if (!before || !after || !config) return;
+
+  FILE *out = config->output;
+  if (config->use_colors) {
+     fprintf(out, "\n%sGC State Diff%s:\n", ANSI_BOLD, ANSI_RESET);
+  } else {
+     fprintf(out, "\nGC State Diff:\n");
+  }
+
+  // TODO: probably rename this to widget width or something
+  int width = config->graph_width;
+  gc_viz_separator(config, '-', width);
+
+  // object count
+  int obj_diff = (int)after->object_count - (int)before->object_count;
+  fprintf(out, "Objects:      %zu -> %zu", before->object_count, after->object_count);
+
+  if (obj_diff > 0) {
+    if (config->use_colors) {
+       fprintf(out, "%s(+%d)%s:\n", ANSI_GREEN, obj_diff, ANSI_RESET);
+    } else {
+       fprintf(out, "(+%d):\n", obj_diff);
+    }
+  } else if (obj_diff < 0) {
+    if (config->use_colors) {
+       fprintf(out, "%s(%d)%s:\n", ANSI_RED, obj_diff, ANSI_RESET);
+    } else {
+       fprintf(out, "(%d):\n", obj_diff);
+    }
+  } else {
+    fprintf(out, "(no change)\n");
+  }
+
+  // heap
+  int heap_diff = (int)after->heap_used - (int)before->heap_used;
+  fprintf(out, "Heap Used:     %zu -> %zu", before->heap_used, after->heap_used);
+
+  if (heap_diff > 0) {
+    if (config->use_colors) {
+       fprintf(out, "%s(+%d bytes)%s:\n", ANSI_YELLOW, heap_diff, ANSI_RESET);
+    } else {
+       fprintf(out, "(+%d bytes):\n", heap_diff);
+    }
+  } else if (heap_diff < 0) {
+    if (config->use_colors) {
+       fprintf(out, "%s(%d bytes)%s:\n", ANSI_GREEN, heap_diff, ANSI_RESET);
+    } else {
+       fprintf(out, "(%d bytes):\n", heap_diff);
+    }
+  } else {
+    fprintf(out, "(no change)\n");
+  }
+
+  // collected objects
+  size_t collected = 0;
+  for (size_t i = 0; i < before->object_count; ++i) {
+    bool found = false;
+    for (size_t j = 0; j < after->object_count; ++j) {
+      if (before->object_ptrs[i] == after->object_ptrs[j]) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) ++collected;
+  }
+
+  if (collected > 0) {
+    if (config->use_colors) {
+      fprintf(out, "%sCollected:    %zu objects%s\n", ANSI_RED, collected, ANSI_RESET);
+    } else {
+      fprintf(out, "Collected:    %zu objects\n", collected);
+    }
+  }
+  gc_viz_separator(config, '-', width);
+
+}
