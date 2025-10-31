@@ -1,4 +1,5 @@
 #include "gc_visualizer.h"
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -120,4 +121,92 @@ void gc_viz_object_list(const gc_t *gc, const gc_viz_config_t *config) {
     curr = curr->next;
   }
   fprintf(out, "\n");
+}
+
+void gc_viz_reference_graph(const gc_t *gc, const gc_viz_config_t *config) {
+  if (!gc || !config) return;
+
+  FILE *out = config->output;
+
+  // TODO: colors
+  fprintf(out, "Reference Graph:\n");
+
+  ref_node_t* ref = gc->references;
+  if (!ref) {
+    fprintf(out, " [no references]\n");
+  }
+
+  void* last = NULL;
+  while (ref) {
+    if (ref->from_obj != last) {
+      if (last) {
+        fprintf(out, "\n");
+      }
+      if (config->show_addresses) {
+        fprintf(out, "  %p", ref->from_obj);
+      } else {
+        fprintf(out, "  obj_%p", ref->from_obj);
+      }
+
+      // TODO: colors
+      fprintf(out, " --> ");
+      last = ref->from_obj;
+    } else {
+      fprintf(out, ", ");
+    }
+
+    if (config->show_addresses) {
+      fprintf(out, "  %p", ref->to_obj);
+    } else {
+      fprintf(out, "  obj_%p", ref->to_obj);
+    }
+
+    ref = ref->next;
+  }
+  fprintf(out, "\n");
+}
+
+void gc_viz_stats_dashboard(const gc_t *gc, const gc_viz_config_t *config) {
+  if (!gc || !config) return;
+
+  FILE *out = config->output;
+
+  // TODO: probably rename this to widget width or something
+  int width = config->graph_width;
+
+  // TODO: colors
+  fprintf(out, "     GC Statistics Dashboard\n");
+
+  gc_viz_separator(config, '=', width);
+  fprintf(out, " Objects:        %zu\n", simple_gc_object_count(gc));
+  fprintf(out, " Heap Used:      %zu / %zu bytes\n", simple_gc_heap_used(gc), simple_gc_heap_capacity(gc));
+
+  double usage_percent = 0.0;
+  if (simple_gc_heap_capacity(gc) > 0) {
+    usage_percent = (double) simple_gc_heap_used(gc) / simple_gc_heap_capacity(gc)* 100;
+  }
+
+  fprintf(out, " Usage:          %.1f%%\n", usage_percent);
+  fprintf(out, " Roots:          %zu\n", gc->root_count);
+
+  size_t ref_count = 0;
+  ref_node_t* ref = gc->references;
+  while (ref) {
+    ++ref_count;
+    ref = ref->next;
+  }
+
+  fprintf(out, " References:     %zu\n", ref_count);
+  gc_viz_separator(config, '=', width);
+}
+
+void gc_viz_full_state(const gc_t *gc, const gc_viz_config_t *config) {
+  if (!gc || !config) return;
+
+  gc_viz_stats_dashboard(gc, config);
+  gc_viz_heap_bar(gc, config);
+  gc_viz_object_list(gc, config);
+  gc_viz_reference_graph(gc, config);
+
+  fprintf(config->output, "\n");
 }

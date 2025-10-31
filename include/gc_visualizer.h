@@ -22,6 +22,9 @@ void gc_viz_clear_screen(void);
 
 void gc_viz_heap_bar(const gc_t *gc, const gc_viz_config_t *config);
 void gc_viz_object_list(const gc_t *gc, const gc_viz_config_t *config);
+void gc_viz_reference_graph(const gc_t *gc, const gc_viz_config_t *config);
+void gc_viz_stats_dashboard(const gc_t *gc, const gc_viz_config_t *config);
+void gc_viz_full_state(const gc_t *gc, const gc_viz_config_t *config);
 
 
 

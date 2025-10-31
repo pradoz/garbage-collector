@@ -3,6 +3,27 @@
 #include "gc_visualizer.h"
 #include <string.h>
 
+// // helpers to capture output since visualizer writes to stdout
+// typedef struct {
+//   char buffer[4096];
+//   size_t pos;
+// } string_buf_t;
+//
+// static size_t sbuf_write(void *ptr, size_t size, size_t nmemb, void *stream) {
+//   string_buf_t *buf = (string_buf_t *)stream;
+//   size_t to_write = size * nmemb;
+//
+//   if (buf->pos + to_write >= sizeof(buf->buffer)) {
+//     to_write = sizeof(buf->buffer) - buf->pos - 1;
+//   }
+//
+//   memcpy(buf->buffer + buf->pos, ptr, to_write);
+//   buf->pos += to_write;
+//   buf->buffer[buf->pos] = '\0';
+//
+//   return nmemb;
+// }
+
 
 static MunitResult test_viz_default_config(const MunitParameter params[], void *data) {
   (void)params;
@@ -85,13 +106,102 @@ static MunitResult test_viz_object_list(const MunitParameter params[], void *dat
   return MUNIT_OK;
 }
 
+static MunitResult test_viz_reference_graph(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
 
+  gc_t gc;
+  simple_gc_init(&gc, 1024);
+  gc_viz_config_t config = gc_viz_default_config();
+  config.use_colors = false;
+
+  // null things
+  gc_viz_reference_graph(NULL, &config);
+  gc_viz_reference_graph(&gc, NULL);
+
+  // empty graph
+  gc_viz_reference_graph(&gc, &config);
+
+  // with objects
+  void *obj1 = simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, 16);
+  void *obj2 = simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, 16);
+  void *obj3 = simple_gc_alloc(&gc, OBJ_TYPE_STRUCT, 16);
+
+  simple_gc_add_reference(&gc, obj1, obj2);
+  simple_gc_add_reference(&gc, obj1, obj3);
+  simple_gc_add_reference(&gc, obj2, obj3);
+
+  gc_viz_reference_graph(&gc, &config);
+
+  simple_gc_destroy(&gc);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_viz_stats_dashboard(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  gc_t gc;
+  simple_gc_init(&gc, 1024);
+  gc_viz_config_t config = gc_viz_default_config();
+  config.use_colors = false;
+
+  // null things
+  gc_viz_stats_dashboard(NULL, &config);
+  gc_viz_stats_dashboard(&gc, NULL);
+
+  // empty GC
+  gc_viz_stats_dashboard(&gc, &config);
+
+  // with objects
+  void *obj1 = simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+  void *obj2 = simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 100);
+  simple_gc_add_root(&gc, obj1);
+  simple_gc_add_reference(&gc, obj1, obj2);
+  gc_viz_stats_dashboard(&gc, &config);
+
+  simple_gc_destroy(&gc);
+
+  return MUNIT_OK;
+}
+
+static MunitResult test_viz_full_state(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  gc_t gc;
+  simple_gc_init(&gc, 1024);
+  gc_viz_config_t config = gc_viz_default_config();
+  config.use_colors = false;
+
+  // null things
+  gc_viz_full_state(NULL, &config);
+  gc_viz_full_state(&gc, NULL);
+
+  // empty GC
+  gc_viz_full_state(&gc, &config);
+
+  // with objects
+  void *obj1 = simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+  void *obj2 = simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 50);
+  simple_gc_add_root(&gc, obj1);
+  simple_gc_add_reference(&gc, obj1, obj2);
+  gc_viz_full_state(&gc, &config);
+
+  simple_gc_destroy(&gc);
+
+  return MUNIT_OK;
+}
 
 static MunitTest tests[] = {
     {"/viz_default_config", test_viz_default_config, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/viz_type_string", test_viz_type_string, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/viz_heap_bar", test_viz_heap_bar, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/viz_object_list", test_viz_object_list, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/viz_reference_graph", test_viz_reference_graph, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/viz_stats_dashboard", test_viz_stats_dashboard, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/viz_full_state", test_viz_full_state, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}};
 
 static const MunitSuite suite = {"/simple_gc", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};

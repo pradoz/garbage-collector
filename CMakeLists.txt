@@ -13,7 +13,16 @@ add_library(simple_gc
   src/simple_gc.c
   src/gc_visualizer.c
 )
+
 target_include_directories(simple_gc PUBLIC include)
 
 enable_testing()
 add_subdirectory(test)
+add_subdirectory(examples)
+
+add_custom_target(example
+  COMMAND visualizer_demo
+  DEPENDS visualizer_demo
+  WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/examples
+  COMMENT "Running visualizer demo..."
+)
