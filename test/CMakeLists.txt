@@ -26,3 +26,16 @@ add_test(NAME test_visualizer COMMAND test_visualizer)
 set_tests_properties(test_visualizer PROPERTIES
   ENVIRONMENT "MUNIT_OUTPUT_CAPTURE=1"
 )
+
+add_executable(test_stack_scan
+  test_stack_scan.c
+  munit/munit.c
+)
+
+target_link_libraries(test_stack_scan simple_gc)
+target_include_directories(test_stack_scan PRIVATE
+  ${CMAKE_SOURCE_DIR}/include
+  munit
+)
+
+add_test(NAME test_stack_scan COMMAND test_stack_scan)

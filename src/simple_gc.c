@@ -72,6 +72,10 @@ bool simple_gc_init(gc_t* gc, size_t init_capacity) {
   // refs
   gc->references = NULL;
 
+  // stack scanning
+  gc->stack_bottom = NULL;
+  gc->auto_root_scan_enabled = false;
+
   return true;
 }
 
@@ -334,4 +338,22 @@ bool simple_gc_remove_reference(gc_t *gc, void *from_ptr, void *to_ptr) {
   }
 
   return false;
+}
+
+bool simple_gc_set_stack_bottom(gc_t *gc, void *hint) {
+  if (!gc) return false;
+
+  // where hint points to a local variable
+  gc->stack_bottom = hint;
+  return true;
+}
+
+void *simple_gc_get_stack_bottom(gc_t *gc) {
+  return gc ? gc->stack_bottom : NULL;
+}
+
+bool simple_gc_enable_auto_roots(gc_t *gc, bool enable) {
+  if (!gc) return false;
+  gc->auto_root_scan_enabled = enable;
+  return true;
 }

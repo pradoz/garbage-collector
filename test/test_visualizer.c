@@ -287,7 +287,7 @@ static MunitResult test_viz_diff(const MunitParameter params[], void *data) {
 
   gc_snapshot_t *before = gc_viz_snapshot(&gc);
 
-  // collect; object should be removed
+  // collect; obj2 should be removed
   simple_gc_collect(&gc);
 
   gc_snapshot_t *after = gc_viz_snapshot(&gc);

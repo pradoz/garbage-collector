@@ -36,6 +36,10 @@ typedef struct gc_context {
   size_t root_count;
   size_t root_capacity;
   ref_node_t *references;
+  // stack scanning
+  void *stack_bottom;  // highest address (architecture assumption)
+  bool auto_root_scan_enabled;
+
 } gc_t;
 
 typedef struct reference_node {
@@ -79,6 +83,11 @@ void simple_gc_collect(gc_t *gc);
 // ref counting
 bool simple_gc_add_reference(gc_t *gc, void *from_ptr, void *to_ptr);
 bool simple_gc_remove_reference(gc_t *gc, void *from_ptr, void *to_ptr);
+
+// stack scanning
+bool simple_gc_set_stack_bottom(gc_t *gc, void *hint);
+void *simple_gc_get_stack_bottom(gc_t *gc);
+bool simple_gc_enable_auto_roots(gc_t *gc, bool enable);
 
 
 #endif /* SIMPLE_GC_H */
