@@ -47,11 +47,22 @@ int main(void) {
   printf("\nCreating reference graph...\n");
   void *struct1 = simple_gc_alloc(gc, OBJ_TYPE_STRUCT, 64);
   void *struct2 = simple_gc_alloc(gc, OBJ_TYPE_STRUCT, 64);
+  void *struct3 = simple_gc_alloc(gc, OBJ_TYPE_STRUCT, 64);
 
   simple_gc_add_root(gc, struct1);
   simple_gc_add_reference(gc, struct1, struct2);
   simple_gc_add_reference(gc, struct1, num1);
   simple_gc_add_reference(gc, struct2, str);
+  simple_gc_add_reference(gc, struct2, struct3);
+  simple_gc_add_reference(gc, struct3, struct1);
+
+  gc_viz_full_state(gc, &config);
+  printf("\nPress Enter to continue...");
+  getchar();
+
+  printf("\nMarking struct1...\n");
+  simple_gc_mark(gc, (void*)struct1);
+  // simple_gc_sweep(gc);
 
   gc_viz_full_state(gc, &config);
   printf("\nPress Enter to continue...");

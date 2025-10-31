@@ -61,18 +61,30 @@ void gc_viz_heap_bar(const gc_t *gc, const gc_viz_config_t *config) {
 
   if (capacity == 0) {
     fprintf(out, "Heap: [empty]\n");
+    return;
   }
 
   int bar_width = config->graph_width;
   int filled = (int)((double) used / capacity * bar_width);
   int percent = (int)((double) used / capacity * 100);
 
-  // TODO: colors
+  if (config->use_colors) {
+    fprintf(out, "%sHeap Memory Layout%s (%zu bytes / %zu capacity)\n",
+            ANSI_BOLD, ANSI_RESET, used, capacity);
+  } else {
+    fprintf(out, "Heap Memory Layout (%zu bytes / %zu capacity)\n",
+            used, capacity);
+  }
 
   fprintf(out, "[");
   for (int i = 0; i < bar_width; ++i) {
     if (i < filled) {
-      fprintf(out, "#");
+      if (config->use_colors) {
+        fprintf(out, "%s#%s", ANSI_GREEN, ANSI_RESET);
+
+      } else {
+        fprintf(out, "#");
+      }
     } else {
       fprintf(out, ".");
     }
@@ -87,8 +99,12 @@ void gc_viz_object_list(const gc_t *gc, const gc_viz_config_t *config) {
   FILE *out = config->output;
   size_t count = simple_gc_object_count(gc);
 
-  // TODO: colors
-  fprintf(out, "Objects(%zu):\n", count);
+  if (config->use_colors) {
+    fprintf(out, "%sObjects%s (%zu):\n", ANSI_BOLD, ANSI_RESET, count);
+
+  } else {
+    fprintf(out, "Objects (%zu):\n", count);
+  }
 
   if (count == 0) {
     fprintf(out, "[none]");
@@ -108,14 +124,21 @@ void gc_viz_object_list(const gc_t *gc, const gc_viz_config_t *config) {
     fprintf(out, "%s(%zu) ", type_str, curr->size);
 
     if (curr->marked) {
-      // TODO: colors
-      fprintf(out, "marked ");
+      if (config->use_colors) {
+        fprintf(out, "%smarked%s ", ANSI_YELLOW, ANSI_RESET);
+      } else {
+        fprintf(out, "marked ");
+      }
     } else {
       fprintf(out, "unmarked ");
     }
 
     if (is_root) {
-      fprintf(out, "[ROOT]");
+      if (config->use_colors) {
+        fprintf(out, "%s[ROOT]%s", ANSI_CYAN, ANSI_RESET);
+      } else {
+        fprintf(out, "[ROOT]");
+      }
     }
 
     curr = curr->next;
@@ -128,8 +151,11 @@ void gc_viz_reference_graph(const gc_t *gc, const gc_viz_config_t *config) {
 
   FILE *out = config->output;
 
-  // TODO: colors
-  fprintf(out, "Reference Graph:\n");
+  if (config->use_colors) {
+    fprintf(out, "%sReference Graph%s:\n", ANSI_BOLD, ANSI_RESET);
+  } else {
+    fprintf(out, "Reference Graph:\n");
+  }
 
   ref_node_t* ref = gc->references;
   if (!ref) {
@@ -148,8 +174,11 @@ void gc_viz_reference_graph(const gc_t *gc, const gc_viz_config_t *config) {
         fprintf(out, "  obj_%p", ref->from_obj);
       }
 
-      // TODO: colors
-      fprintf(out, " --> ");
+      if (config->use_colors) {
+        fprintf(out, " %s-->%s ", ANSI_GREEN, ANSI_RESET);
+      } else {
+        fprintf(out, " --> ");
+      }
       last = ref->from_obj;
     } else {
       fprintf(out, ", ");
@@ -174,8 +203,11 @@ void gc_viz_stats_dashboard(const gc_t *gc, const gc_viz_config_t *config) {
   // TODO: probably rename this to widget width or something
   int width = config->graph_width;
 
-  // TODO: colors
-  fprintf(out, "     GC Statistics Dashboard\n");
+  if (config->use_colors) {
+    fprintf(out, "%sGC Statistics Dashboard%s\n", ANSI_BOLD, ANSI_RESET);
+  } else {
+    fprintf(out, "     GC Statistics Dashboard\n");
+  }
 
   gc_viz_separator(config, '=', width);
   fprintf(out, " Objects:        %zu\n", simple_gc_object_count(gc));
