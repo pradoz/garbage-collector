@@ -36,8 +36,7 @@ static MunitResult test_init_header(const MunitParameter params[], void *data) {
   return MUNIT_OK;
 }
 
-static MunitResult test_is_valid_header(const MunitParameter params[],
-                                        void *data) {
+static MunitResult test_is_valid_header(const MunitParameter params[], void *data) {
   (void)params;
   (void)data;
 
@@ -97,7 +96,7 @@ static MunitResult test_gc_init(const MunitParameter params[], void *data) {
   // clean up
   simple_gc_destroy(&gc);
 
-  // invalid GC
+  // null GC
   result = simple_gc_init(NULL, 1024);
   munit_assert_false(result);
 
@@ -165,40 +164,39 @@ static MunitResult test_gc_alloc(const MunitParameter params[], void* data) {
     gc_t gc;
     simple_gc_init(&gc, 1024);
 
-    // Remember initial usage
+    // memo initial usage
     size_t initial_used = simple_gc_heap_used(&gc);
-
-    // Calculate expected size
     size_t expected_size = sizeof(obj_header_t) + sizeof(int);
 
-    // Allocate an integer
+    // allocate an integer
     int* obj = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
     munit_assert_not_null(obj);
     munit_assert_size(simple_gc_object_count(&gc), ==, 1);
 
-    // Verify exact heap usage increase
+    // increase heap usage
     munit_assert_size(simple_gc_heap_used(&gc) - initial_used, ==, expected_size);
 
-    // Test that we can use the allocated memory without segfaulting
+    // use allocated memory without segfaulting
     *obj = 42;
     munit_assert_int(*obj, ==, 42);
 
-    // Verify object header is accessible and correctly initialized
+    // verify object header is accessible and initialized
     obj_header_t* header = simple_gc_find_header(&gc, obj);
     munit_assert_not_null(header);
     munit_assert_size(header->size, ==, sizeof(int));
     munit_assert_int(header->type, ==, OBJ_TYPE_PRIMITIVE);
 
-    // Allocate an object that requires more memory - this tests that allocation size scales correctly
+    // tests allocation size scale
     char* big_obj = (char*)simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 100);
     munit_assert_not_null(big_obj);
 
-    // Try to write to the whole allocated region - this will crash if not enough memory was allocated
+    // write to the whole allocated regionthis
+    // NOTE: this will crash if not enough memory was allocated
     for (size_t i = 0; i < 100; i++) {
         big_obj[i] = (char)i;
     }
 
-    // Read back values to verify memory integrity
+    // verify memory integrity
     for (size_t i = 0; i < 100; i++) {
         munit_assert_int(big_obj[i], ==, (char)i);
     }
@@ -331,6 +329,57 @@ static MunitResult test_gc_find_header(const MunitParameter params[], void* data
     return MUNIT_OK;
 }
 
+static MunitResult test_gc_root_management(const MunitParameter params[], void* data) {
+    (void)params;
+    (void)data;
+
+    gc_t gc;
+    simple_gc_init(&gc, 1024);
+
+    // add objects to root array
+    int* obj1 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    int* obj2 = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+
+    bool result = simple_gc_add_root(&gc, obj1);
+    munit_assert_true(result);
+    result = simple_gc_add_root(&gc, obj2);
+    munit_assert_true(result);
+
+    // null GC
+    result = simple_gc_add_root(NULL, obj1);
+    munit_assert_false(result);
+
+    // null ptr
+    result = simple_gc_add_root(&gc, NULL);
+    munit_assert_false(result);
+
+    // invalid ptr
+    int nope;
+    result = simple_gc_add_root(&gc, &nope);
+    munit_assert_false(result);
+
+    // remove object from root array
+    result = simple_gc_remove_root(&gc, obj1);
+    munit_assert_true(result);
+
+    // remove again, expect failure
+    result = simple_gc_remove_root(&gc, obj1);
+    munit_assert_false(result);
+
+    // null GC
+    result = simple_gc_remove_root(NULL, obj2);
+    munit_assert_false(result);
+
+    // null ptr
+    result = simple_gc_remove_root(&gc, NULL);
+    munit_assert_false(result);
+
+    // free
+    simple_gc_destroy(&gc);
+
+    return MUNIT_OK;
+}
+
 static MunitTest tests[] = {
     {"/version", test_version, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/init_header", test_init_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
@@ -344,7 +393,7 @@ static MunitTest tests[] = {
     {"/gc_alloc_boundary", test_gc_alloc_boundary, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_alloc_stress", test_gc_alloc_stress, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_find_header", test_gc_find_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    // {"/gc_root_management", test_gc_root_management, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/gc_root_management", test_gc_root_management, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}};
 
 static const MunitSuite suite = {"/simple_gc", tests, NULL, 1,

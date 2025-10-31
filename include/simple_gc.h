@@ -31,6 +31,9 @@ typedef struct gc_context {
   size_t object_count;
   size_t heap_used;
   size_t heap_capacity;
+  void **roots; // array of root pointers
+  size_t root_count;
+  size_t root_capacity;
 } gc_t;
 
 const char *simple_gc_version(void);
@@ -44,5 +47,7 @@ size_t simple_gc_heap_capacity(const gc_t *gc);
 size_t simple_gc_heap_used(const gc_t *gc);
 void *simple_gc_alloc(gc_t *gc, obj_type_t type, size_t size);
 obj_header_t *simple_gc_find_header(gc_t *gc, void *ptr);
+bool simple_gc_add_root(gc_t *gc, void *ptr);
+bool simple_gc_remove_root(gc_t *gc, void *ptr);
 
 #endif /* SIMPLE_GC_H */
