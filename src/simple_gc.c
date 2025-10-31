@@ -204,3 +204,77 @@ bool simple_gc_remove_root(gc_t *gc, void *ptr) {
   }
   return false;  // not found
 }
+
+bool simple_gc_is_root(gc_t *gc, void *ptr) {
+  if (!gc || !ptr) {
+    return false;
+  }
+
+  for (size_t i = 0; i < gc->root_count; ++i) {
+    if (gc->roots[i] == ptr) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+void simple_gc_mark(gc_t *gc, void *ptr) {
+  if (!gc || !ptr) {
+    return;
+  }
+
+  obj_header_t* header = simple_gc_find_header(gc, ptr);
+  if (!header || header->marked) {
+    return;
+  }
+
+  // header is reachable
+  header->marked = true;
+
+  if (header->type == OBJ_TYPE_ARRAY || header->type == OBJ_TYPE_STRUCT) {
+    // TODO: traverse object references
+
+  }
+}
+
+void simple_gc_mark_roots(gc_t *gc) {
+  if (!gc) {
+    return;
+  }
+
+  for (size_t i = 0; i < gc->root_count; ++i) {
+    simple_gc_mark(gc, gc->roots[i]);
+  }
+}
+
+void simple_gc_sweep(gc_t *gc) {
+  if (!gc) {
+    return;
+  }
+
+  obj_header_t** curr = &gc->objects;
+  while (*curr) {
+    if (!(*curr)->marked) { // unreachable
+      obj_header_t* tmp = *curr;
+      *curr = (*curr)->next;
+
+      gc->object_count--;
+      gc->heap_used -= (sizeof(obj_header_t) + tmp->size);
+
+      free(tmp);
+    } else {
+      (*curr)->marked = false;
+      curr = &(*curr)->next;
+    }
+  }
+}
+
+void simple_gc_collect(gc_t *gc) {
+  if (!gc) {
+    return;
+  }
+
+  simple_gc_mark_roots(gc);
+  simple_gc_sweep(gc);
+}
