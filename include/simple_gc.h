@@ -147,6 +147,11 @@ bool gc_init_pools(gc_t *gc);
 void gc_free_pool_block(pool_block_t *block);
 void gc_destroy_size_class(size_class_t *sc);
 void gc_destroy_pools(gc_t* gc);
+bool gc_pointer_in_block(pool_block_t *block, void *ptr);
+obj_header_t* gc_find_header_in_pools(gc_t *gc, void *ptr);
+void gc_free_to_pool(gc_t *gc, obj_header_t *header);
+void gc_sweep_pools(gc_t *gc);
+void gc_sweep_large_objects(gc_t *gc);
 
 
 #endif /* SIMPLE_GC_H */

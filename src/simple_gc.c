@@ -454,6 +454,21 @@ obj_header_t *simple_gc_find_header(gc_t *gc, void *ptr) {
     return NULL;
   }
 
+  // check pools first
+  if (gc->use_pools) {
+    obj_header_t* header = gc_find_header_in_pools(gc, ptr);
+    if (header) return header;
+  }
+
+  // check large objects
+  obj_header_t *large = gc->large_objects;
+  while (large) {
+    void *obj_ptr = (void*)(large + 1);
+    if (obj_ptr == ptr) return large;
+    large = large->next;
+  }
+
+  // fallback to legacy (non-pool) object management
   obj_header_t* curr = gc->objects;
   while (curr) {
     void* obj = (void*)(curr + 1);
@@ -560,8 +575,12 @@ void simple_gc_mark_roots(gc_t *gc) {
 }
 
 void simple_gc_sweep(gc_t *gc) {
-  if (!gc) {
-    return;
+  if (!gc) return;
+
+  if (gc->use_pools) {
+    gc_sweep_pools(gc);
+    gc_sweep_large_objects(gc);
+    return;  // exit early
   }
 
   obj_header_t** curr = &gc->objects;
@@ -728,4 +747,147 @@ bool simple_gc_auto_init_stack(gc_t *gc) {
   gc->stack_bottom = stack_bottom;
   gc->auto_root_scan_enabled = true;
   return true;
+}
+
+bool gc_pointer_in_block(pool_block_t *block, void *ptr) {
+  if (!block || !ptr) return false;
+
+  char *start = block->memory;
+  char *end = start + (block->slot_size * block->capacity);
+  char *p = (char*) ptr;
+  return (p >= start && p < end);
+}
+
+// TODO: debug
+obj_header_t* gc_find_header_in_pools(gc_t *gc, void *ptr) {
+  if (!gc || !ptr) return NULL;
+
+  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
+    size_class_t *sc = &gc->size_classes[i];
+    pool_block_t *block = sc->blocks;
+
+    while (block) {
+      if (gc_pointer_in_block(block, ptr)) {
+        // ptr found in block, find header
+        char *base = (char*) block->memory;
+        char *mem_start = (char*) ptr;
+        ptrdiff_t offset = mem_start - base;
+        size_t slot_index = offset / block->slot_size;
+        char *slot_start = base + (slot_index * block->slot_size);
+
+        obj_header_t *header = (obj_header_t*) slot_start;
+        void *expected_data_ptr = (void*)(header + 1);
+        if (expected_data_ptr == ptr && simple_gc_is_valid_header(header)) {
+          return header;
+        }
+
+        // ptr is in the block but not a valid data pointer
+        return NULL;
+      }
+      block = block->next;
+    }
+  }
+
+  return NULL;
+}
+
+void gc_free_to_pool(gc_t *gc, obj_header_t *header) {
+  if (!gc || !header) return;
+
+  // check if the object is from a pool
+  size_t size = header->size;
+  size_class_t *sc = gc_get_size_class(gc, size);
+  if (!sc) return;
+
+  // find which block the object belongs to
+  void *ptr = (void*)(header + 1);
+  pool_block_t *block = sc->blocks;
+
+  while (block) {
+    if (gc_pointer_in_block(block, ptr)) {
+      free_node_t *node = (free_node_t*) header;
+      node->next = block->free_list;
+      block->free_list = node;
+      block->used--;
+      sc->total_used--;
+      return;
+    }
+    block = block->next;
+  }
+}
+
+void gc_sweep_pools(gc_t *gc) {
+  if (!gc) return;
+
+  // sweep size classes
+  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
+    size_class_t *sc = &gc->size_classes[i];
+    pool_block_t *block = sc->blocks;
+
+    while (block) {
+      char *slot = (char*) block->memory;
+
+      for (size_t j = 0; j < block->capacity; ++j) {
+        obj_header_t *header = (obj_header_t*) slot;
+        // slot is in use if not in the free list
+        bool in_use = true;
+        free_node_t *free_node = block->free_list;
+
+        while (free_node) {
+          if ((void*) free_node == (void*) header) {
+            in_use = false;
+            break;
+          }
+          free_node = free_node->next;
+        }
+
+        if (in_use) {
+          // slot is used - check if marked
+          if (!header->marked) {
+            // unmarked, return to pool
+            gc_free_to_pool(gc, header);
+            gc->object_count--;
+            gc->heap_used -= (sizeof(obj_header_t) + header->size);
+          } else {
+            // marked, unmark for next cycle
+            header->marked = false;
+          }
+        }
+
+        slot += block->slot_size;
+      }
+
+      block = block->next;
+    }
+  }
+}
+
+void gc_sweep_large_objects(gc_t *gc) {
+  if (!gc) return;
+
+  obj_header_t *prev = NULL;
+  obj_header_t *curr = gc->large_objects;
+  while (curr) {
+
+    if (!curr->marked) {
+      // unmarked, free it
+      obj_header_t *to_free = curr;
+      curr = curr->next;
+
+      if (!prev) {
+        gc->large_objects = curr;
+      } else {
+        prev->next = curr;
+      }
+
+      gc->object_count--;
+      gc->large_object_count--;
+      gc->heap_used -= (sizeof(obj_header_t) + to_free->size);
+      free(to_free);
+    } else {
+      // marked, unmark and move to next
+      curr->marked = false;
+      curr = curr->next;
+    }
+  }
 }

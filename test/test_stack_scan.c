@@ -228,6 +228,7 @@ static MunitResult test_fully_automatic_collection(const MunitParameter params[]
 
   gc_t gc;
   simple_gc_init(&gc, 1024);
+  gc.use_pools = false;
 
   simple_gc_auto_init_stack(&gc);
 
@@ -256,6 +257,7 @@ static MunitResult test_register_scanning(const MunitParameter params[], void *d
   gc_t gc;
   simple_gc_init(&gc, 1024);
   simple_gc_auto_init_stack(&gc);
+  gc.use_pools = false;
 
   // store a pointer in register
   register int *obj = allocate_in_register(&gc);
@@ -282,6 +284,7 @@ static MunitResult test_stack_scan_performance(const MunitParameter params[], vo
   gc_t gc;
   simple_gc_init(&gc, 1 * 1024 * 1024); // 1 MiB heap
   simple_gc_auto_init_stack(&gc);
+  gc.use_pools = false;
 
   // allocate a lot of heckin' objects
   #define NUM_OBJECTS 10000
