@@ -423,6 +423,196 @@ static MunitResult test_sweep_large_objects(const MunitParameter params[], void 
   return MUNIT_OK;
 }
 
+static MunitResult test_fragmentation_reuse(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  gc_t gc;
+  simple_gc_init(&gc, 1024 * 1024);
+
+  // allocate 100 small objects
+  for (int i = 0; i < 100; i++) {
+    void *obj = simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    if (i % 2 == 0) {
+      simple_gc_add_root(&gc, obj); // root every other object
+    }
+  }
+  munit_assert_size(simple_gc_object_count(&gc), ==, 100);
+
+  // should have 50 objects after garbage collection
+  simple_gc_collect(&gc);
+  munit_assert_size(simple_gc_object_count(&gc), ==, 50);
+
+  // allocate more objects, should reuse freed slots
+  for (int i = 0; i < 30; i++) {
+    simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+  }
+
+  munit_assert_size(simple_gc_object_count(&gc), ==, 80);
+
+  simple_gc_destroy(&gc);
+  return MUNIT_OK;
+}
+
+static MunitResult test_complete_cleanup(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  gc_t gc;
+  simple_gc_init(&gc, 1024 * 1024);
+
+  // allocate many objects
+  for (int i = 0; i < 1000; i++) {
+    void *obj = simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    simple_gc_add_root(&gc, obj);
+  }
+  for (int i = 0; i < 100; i++) {
+    void *obj = simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 512);
+    simple_gc_add_root(&gc, obj);
+  }
+  munit_assert_size(simple_gc_object_count(&gc), ==, 1100);
+
+  // clear all roots
+  gc.root_count = 0;
+
+  // run garbage collection, everything should be freed
+  simple_gc_collect(&gc);
+
+  munit_assert_size(simple_gc_object_count(&gc), ==, 0);
+  munit_assert_size(gc.large_object_count, ==, 0);
+  munit_assert_size(gc.heap_used, ==, 0);
+
+  simple_gc_destroy(&gc);
+  return MUNIT_OK;
+}
+
+static MunitResult test_statistics(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  gc_t gc;
+  simple_gc_init(&gc, 4096);
+
+  for (int i = 0; i < 10; i++) {
+    simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, 16);
+  }
+
+  gc_stats_t stats;
+  simple_gc_get_stats(&gc, &stats);
+
+  munit_assert_size(stats.heap_capacity, ==, 4096);
+  munit_assert_size(stats.heap_used, ==, gc.total_bytes_allocated);
+  munit_assert_size(stats.object_count, ==, 10);
+  munit_assert_size(stats.total_allocations, ==, 10);
+  munit_assert_size(stats.total_collections, ==, 0);
+  munit_assert_size(stats.large_object_count, ==, 0);
+  munit_assert_size(stats.pool_blocks_allocated, ==, 1);
+
+  // run garbage collection
+  simple_gc_collect(&gc);
+
+  simple_gc_get_stats(&gc, &stats);
+  munit_assert_size(stats.total_collections, ==, 1);
+  munit_assert_size(stats.object_count, ==, 0);  // no roots
+  munit_assert_size(gc.total_bytes_freed, ==, gc.total_bytes_allocated);
+
+  // print stats (mostly for debugging)
+  simple_gc_print_stats(&gc);
+
+  simple_gc_destroy(&gc);
+  return MUNIT_OK;
+}
+
+static MunitResult test_allocation_performance(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  #define NUM_ALLOCS 100000
+
+  // benchmark pool allocation
+  gc_t gc_pool;
+  simple_gc_init(&gc_pool, 10 * 1024 * 1024);
+  gc_pool.use_pools = true;
+
+  clock_t start = clock();
+  for (int i = 0; i < NUM_ALLOCS; i++) {
+    int *obj = (int*)simple_gc_alloc(&gc_pool, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    *obj = i;
+  }
+  clock_t end = clock();
+  double pool_time = (double)(end - start) / CLOCKS_PER_SEC;
+
+  // benchmark malloc-based allocation
+  gc_t gc_malloc;
+  simple_gc_init(&gc_malloc, 10 * 1024 * 1024);
+  gc_malloc.use_pools = false;
+
+  start = clock();
+  for (int i = 0; i < NUM_ALLOCS; ++i) {
+    int *obj = (int*)simple_gc_alloc(&gc_malloc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    *obj = i;
+  }
+  end = clock();
+  double malloc_time = (double)(end - start) / CLOCKS_PER_SEC;
+
+  printf("\n=== Allocation Performance ===\n");
+  printf("Allocations:  %d\n", NUM_ALLOCS);
+  printf("Pool time:    %.6f seconds (%.2f ns/alloc)\n",
+         pool_time, (pool_time * 1e9) / NUM_ALLOCS);
+  printf("Malloc time:  %.6f seconds (%.2f ns/alloc)\n",
+         malloc_time, (malloc_time * 1e9) / NUM_ALLOCS);
+  printf("Speedup:      %.2fx\n", malloc_time / pool_time);
+  printf("==============================\n\n");
+
+  // pool should be faster
+  // munit_assert_double(pool_time, <, malloc_time);
+
+  simple_gc_destroy(&gc_pool);
+  simple_gc_destroy(&gc_malloc);
+
+  return MUNIT_OK;
+
+  #undef NUM_ALLOCS
+}
+
+static MunitResult test_collection_performance(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  #define NUM_OBJS 100000
+
+  gc_t gc;
+  simple_gc_init(&gc, 10 * 1024 * 1024);
+
+  // Allocate many objects
+  int *objs[NUM_OBJS];
+  for (int i = 0; i < NUM_OBJS; ++i) {
+    objs[i] = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
+    *objs[i] = i;
+    simple_gc_add_root(&gc, objs[i]);
+  }
+
+  // Benchmark collection
+  clock_t start = clock();
+  simple_gc_collect(&gc);
+  clock_t end = clock();
+  double time = (double)(end - start) / CLOCKS_PER_SEC;
+
+  printf("\n=== Collection Performance ===\n");
+  printf("Objects:      %d\n", NUM_OBJS);
+  printf("Collection:   %.6f seconds\n", time);
+  printf("Per object:   %.2f ns\n", (time * 1e9) / NUM_OBJS);
+  printf("==============================\n\n");
+
+  // All objects should survive
+  munit_assert_size(simple_gc_object_count(&gc), ==, NUM_OBJS);
+
+  simple_gc_destroy(&gc);
+  return MUNIT_OK;
+
+  #undef NUM_OBJS
+}
+
 static MunitTest tests[] = {
   {"/size_class_selection", test_size_class_selection, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/initialization", test_pool_initialization, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
@@ -438,7 +628,11 @@ static MunitTest tests[] = {
   {"/mixed_and_large_objects", test_mixed_and_large_objects, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/sweep_small_objects", test_sweep_small_objects, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/sweep_large_objects", test_sweep_large_objects, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  // {"/performance", test_pools_performance, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/fragmentation_reuse", test_fragmentation_reuse, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/complete_cleanup", test_complete_cleanup, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/statistics", test_statistics, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/allocation_performance", test_allocation_performance, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/collection_performance", test_collection_performance, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}};
 
 static const MunitSuite suite = {"/simple_gc", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};

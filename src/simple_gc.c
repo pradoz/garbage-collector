@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 
 
 // object sizes (excluding header)
@@ -305,6 +306,12 @@ bool simple_gc_init(gc_t* gc, size_t init_capacity) {
     return false;
   }
 
+  // stats
+  gc->total_allocations = 0;
+  gc->total_collections = 0;
+  gc->total_bytes_allocated = 0;
+  gc->total_bytes_freed = 0;
+
   return true;
 }
 
@@ -445,6 +452,10 @@ void *simple_gc_alloc(gc_t *gc, obj_type_t type, size_t size) {
     gc->object_count++;
     gc->heap_used += total_size;
     update_heap_bounds(gc, result, size);
+
+    // stats
+    gc->total_allocations++;
+    gc->total_bytes_allocated += total_size;
   }
   return result;
 }
@@ -604,6 +615,9 @@ void simple_gc_collect(gc_t *gc) {
   if (!gc) {
     return;
   }
+
+  // stats
+  gc->total_collections++;
 
   simple_gc_mark_roots(gc);
 
@@ -847,7 +861,9 @@ void gc_sweep_pools(gc_t *gc) {
             // unmarked, return to pool
             gc_free_to_pool(gc, header);
             gc->object_count--;
-            gc->heap_used -= (sizeof(obj_header_t) + header->size);
+            size_t bytes_changed = (sizeof(obj_header_t) + header->size);
+            gc->heap_used -= bytes_changed;
+            gc->total_bytes_freed += bytes_changed;
           } else {
             // marked, unmark for next cycle
             header->marked = false;
@@ -890,4 +906,52 @@ void gc_sweep_large_objects(gc_t *gc) {
       curr = curr->next;
     }
   }
+}
+
+void simple_gc_get_stats(gc_t *gc, gc_stats_t *stats) {
+  if (!gc || !stats) return;
+  memset(stats, 0, sizeof(gc_stats_t));
+
+  stats->object_count = gc->object_count;
+  stats->heap_used = gc->heap_used;
+  stats->heap_capacity = gc->heap_capacity;
+  stats->total_allocations = gc->total_allocations;
+  stats->total_collections = gc->total_collections;
+  stats->large_object_count = gc->large_object_count;
+
+  stats->pool_blocks_allocated = 0;
+  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
+    size_class_t *sc = &gc->size_classes[i];
+    stats->size_class_stats[i] = sc->total_allocated;
+
+    pool_block_t *block = sc->blocks;
+    while (block) {
+      stats->pool_blocks_allocated++;
+      block = block->next;
+    }
+  }
+}
+
+void simple_gc_print_stats(gc_t *gc) {
+  if (!gc) return;
+
+  gc_stats_t stats;
+  simple_gc_get_stats(gc, &stats);
+
+  printf("\n=== GC Statistics ===\n");
+  printf("Objects:          %zu\n", stats.object_count);
+  printf("Heap used:        %zu bytes\n", stats.heap_used);
+  printf("Heap capacity:    %zu bytes\n", stats.heap_capacity);
+  printf("Total allocs:     %zu\n", stats.total_allocations);
+  printf("Total collections:%zu\n", stats.total_collections);
+  printf("Large objects:    %zu\n", stats.large_object_count);
+  printf("Pool blocks:      %zu\n", stats.pool_blocks_allocated);
+
+  printf("\nSize class allocations:\n");
+  for (int i = 0; i < GC_NUM_SIZE_CLASSES; i++) {
+    printf("  %3zu bytes: %zu\n",
+           GC_SIZE_CLASS_SIZES[i],
+           stats.size_class_stats[i]);
+  }
+  printf("====================\n\n");
 }
