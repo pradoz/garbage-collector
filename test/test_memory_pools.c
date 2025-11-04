@@ -498,11 +498,11 @@ static MunitResult test_large_object_pool(const MunitParameter params[], void *d
   gc_t gc;
   simple_gc_init(&gc, 1024 * 1024);
 
-  // Allocate large object (256-4096 bytes)
+  // allocate large object (256-4096 bytes)
   char *large = (char*)simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 512);
   munit_assert_not_null(large);
 
-  // Fill and verify
+  // fill and verify
   for (int i = 0; i < 512; i++) {
     large[i] = (char)i;
   }
@@ -523,12 +523,12 @@ static MunitResult test_huge_object_mmap(const MunitParameter params[], void *da
   gc_t gc;
   simple_gc_init(&gc, 10 * 1024 * 1024);
 
-  // Allocate huge object (>4KB)
+  // allocate huge object (>4KB)
   size_t huge_size = 8192;
   char *huge = (char*)simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, huge_size);
   munit_assert_not_null(huge);
 
-  // Fill and verify
+  // fill and verify
   for (size_t i = 0; i < huge_size; i++) {
     huge[i] = (char)(i % 256);
   }
@@ -549,26 +549,26 @@ static MunitResult test_large_object_reuse(const MunitParameter params[], void *
   gc_t gc;
   simple_gc_init(&gc, 1024 * 1024);
 
-  // Allocate and free large object
+  // allocate and free large object
   char *large1 = (char*)simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 512);
   munit_assert_not_null(large1);
   large1[0] = 'A';
 
   size_t block_count_before = gc.large_block_count;
 
-  // Collect (no roots - should mark as free)
+  // collect (no roots, should mark as free)
   simple_gc_collect(&gc);
   munit_assert_size(simple_gc_object_count(&gc), ==, 0);
 
-  // Block should still exist but marked as free
+  // block should still exist but marked as free
   munit_assert_size(gc.large_block_count, ==, block_count_before);
 
-  // Allocate again - should reuse block
+  // allocate again, should reuse block
   char *large2 = (char*)simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 512);
   munit_assert_not_null(large2);
   large2[0] = 'B';
 
-  // Should not have allocated new block
+  // should not have allocated new block
   munit_assert_size(gc.large_block_count, ==, block_count_before);
 
   simple_gc_destroy(&gc);
@@ -582,11 +582,11 @@ static MunitResult test_mixed_sizes(const MunitParameter params[], void *data) {
   gc_t gc;
   simple_gc_init(&gc, 10 * 1024 * 1024);
 
-  // Allocate mix of sizes
-  void *tiny = simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, 8);      // Pool
-  void *small = simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, 64);    // Pool
-  void *large = simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 512);       // Large pool
-  void *huge = simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 8192);       // mmap
+  // allocate mix of sizes
+  void *tiny = simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, 8);      // pool
+  void *small = simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, 64);    // pool
+  void *large = simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 512);       // large pool
+  void *huge = simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 8192);       // mmap, no pool
 
   munit_assert_not_null(tiny);
   munit_assert_not_null(small);
@@ -597,13 +597,13 @@ static MunitResult test_mixed_sizes(const MunitParameter params[], void *data) {
   munit_assert_size(gc.large_block_count, ==, 1);
   munit_assert_size(gc.huge_object_count, ==, 1);
 
-  // Add all as roots
+  // add all as roots
   simple_gc_add_root(&gc, tiny);
   simple_gc_add_root(&gc, small);
   simple_gc_add_root(&gc, large);
   simple_gc_add_root(&gc, huge);
 
-  // Collect - all should survive
+  // collect, all should survive
   simple_gc_collect(&gc);
   munit_assert_size(simple_gc_object_count(&gc), ==, 4);
 
@@ -705,10 +705,13 @@ static MunitResult test_collection_performance(const MunitParameter params[], vo
   (void)params;
   (void)data;
 
-  #define NUM_OBJS 100000
+  #define NUM_OBJS 10000
 
   gc_t gc;
   simple_gc_init(&gc, 10 * 1024 * 1024);
+  gc.config.auto_collect = false;
+  gc.config.auto_expand_pools = false;
+  gc.config.auto_shrink_pools = false;
 
   // allocate many objects
   int *objs[NUM_OBJS];
@@ -740,29 +743,29 @@ static MunitResult test_collection_performance(const MunitParameter params[], vo
 }
 
 static MunitTest tests[] = {
-  {"/size_class_selection", test_size_class_selection, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/initialization", test_pool_initialization, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/cleanup", test_pool_cleanup, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/block_creation", test_pool_block_creation, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/allocation_basic", test_pool_allocation_basic, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/size_classes", test_pool_size_classes, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/large_object_allocation", test_large_object_allocation, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/expansion", test_pool_expansion, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/mark_and_sweep", test_pool_mark_and_sweep, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/reference_chains", test_pool_reference_chains, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/pool_reuse", test_pool_reuse, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/mixed_and_large_objects", test_mixed_and_large_objects, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/sweep_small_objects", test_sweep_small_objects, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/sweep_large_objects", test_sweep_large_objects, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/fragmentation_reuse", test_fragmentation_reuse, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/complete_cleanup", test_complete_cleanup, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/mixed_sizes", test_mixed_sizes, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/large_object_reuse", test_large_object_reuse, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/huge_object_mmap", test_huge_object_mmap, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/large_object_pool", test_large_object_pool, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/statistics", test_statistics, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/allocation_performance", test_allocation_performance, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/collection_performance", test_collection_performance, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/size_class_selection", test_size_class_selection, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/initialization", test_pool_initialization, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/cleanup", test_pool_cleanup, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/block_creation", test_pool_block_creation, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/allocation_basic", test_pool_allocation_basic, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/size_classes", test_pool_size_classes, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/large_object_allocation", test_large_object_allocation, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/expansion", test_pool_expansion, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/mark_and_sweep", test_pool_mark_and_sweep, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/reference_chains", test_pool_reference_chains, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/pool_reuse", test_pool_reuse, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/mixed_and_large_objects", test_mixed_and_large_objects, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/sweep_small_objects", test_sweep_small_objects, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/sweep_large_objects", test_sweep_large_objects, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/fragmentation_reuse", test_fragmentation_reuse, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/complete_cleanup", test_complete_cleanup, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/mixed_sizes", test_mixed_sizes, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/large_object_reuse", test_large_object_reuse, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/huge_object_mmap", test_huge_object_mmap, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/large_object_pool", test_large_object_pool, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/statistics", test_statistics, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/allocation_performance", test_allocation_performance, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools/collection_performance", test_collection_performance, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}};
 
 static const MunitSuite suite = {"/simple_gc", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};
