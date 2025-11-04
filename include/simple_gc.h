@@ -24,9 +24,14 @@ extern const size_t GC_SIZE_CLASS_SIZES[GC_NUM_SIZE_CLASSES];
 typedef struct obj_header obj_header_t;
 typedef struct gc_context gc_t;
 typedef struct reference_node ref_node_t;
+
 typedef struct size_class size_class_t;
 typedef struct large_block large_block_t;
 typedef struct huge_object huge_object_t;
+
+typedef struct relocation_entry relocation_entry_t;
+typedef struct compaction_ctx compaction_ctx_t;
+typedef struct live_obj live_obj_t;
 
 
 typedef enum {
@@ -65,6 +70,24 @@ typedef struct size_class {
   size_t total_allocated;
 } size_class_t;
 
+typedef struct relocation_entry {
+  void *old_addr;
+  void *new_addr;
+  relocation_entry_t *next;
+} relocation_entry_t;
+
+typedef struct compaction_ctx {
+  relocation_entry_t *relocations;
+  size_t relocation_count;
+  bool in_progress;
+} compaction_ctx_t;
+
+typedef struct live_obj {
+    obj_header_t *header;
+    void *data;
+    pool_block_t *block;
+} live_obj_t;
+
 typedef struct gc_context {
   obj_header_t *objects; // linked-list
   size_t object_count;
@@ -90,12 +113,15 @@ typedef struct gc_context {
   size_t large_block_count;
   huge_object_t *huge_objects;
   size_t huge_object_count;
+  compaction_ctx_t compaction;
 
   // statistics
   size_t total_allocations;
   size_t total_collections;
   size_t total_bytes_allocated;
   size_t total_bytes_freed;
+  size_t total_compactions;
+  size_t bytes_reclaimed;
 } gc_t;
 
 typedef struct large_block {
@@ -183,6 +209,8 @@ size_class_t* gc_get_size_class(gc_t *gc, size_t size);
 pool_block_t* gc_create_pool_block(size_t slot_size, size_t capacity);
 bool gc_pointer_in_block(pool_block_t *block, void *ptr);
 void gc_free_to_pool(gc_t *gc, obj_header_t *header);
+bool simple_gc_should_compact(gc_t *gc);
+void simple_gc_compact(gc_t *gc);
 
 void simple_gc_get_stats(gc_t *gc, gc_stats_t *stats);
 void simple_gc_print_stats(gc_t *gc);

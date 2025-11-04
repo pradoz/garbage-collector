@@ -902,6 +902,11 @@ void simple_gc_collect(gc_t *gc) {
   }
 
   simple_gc_sweep(gc);
+
+  // auto-compact if fragmented
+  if (simple_gc_should_compact(gc)) {
+    simple_gc_compact(gc);
+  }
 }
 
 bool simple_gc_add_reference(gc_t *gc, void *from_ptr, void *to_ptr) {
@@ -1069,6 +1074,231 @@ void gc_free_to_pool(gc_t *gc, obj_header_t *header) {
       return;
     }
     block = block->next;
+  }
+}
+
+static bool gc_add_relocation(compaction_ctx_t *ctx, void *old_addr, void *new_addr) {
+  if (!ctx || !old_addr || !new_addr) return false;
+
+  relocation_entry_t *entry = (relocation_entry_t*) malloc(sizeof(relocation_entry_t));
+  if (!entry) return false;
+
+  entry->old_addr = old_addr;
+  entry->new_addr = new_addr;
+  entry->next = ctx->relocations;
+
+  ctx->relocations = entry;
+  ctx->relocation_count++;
+
+  return true;
+}
+
+static void *gc_find_new_address(compaction_ctx_t *ctx, void *old_addr) {
+  if (!ctx || !old_addr) return NULL;
+
+  relocation_entry_t *entry = ctx->relocations;
+  while (entry) {
+    if (entry->old_addr == old_addr) {
+      return entry->new_addr;
+    }
+    entry = entry->next;
+  }
+
+  // did not relocate
+  return old_addr;
+}
+
+static void gc_clear_relocations(compaction_ctx_t *ctx) {
+  if (!ctx) return;
+
+  relocation_entry_t *entry = ctx->relocations;
+  while (entry) {
+    relocation_entry_t* next = entry->next;
+    free(entry);
+    entry = next;
+  }
+
+  ctx->relocations = NULL;
+  ctx->relocation_count = 0;
+}
+
+static void gc_compact_size_class(gc_t *gc, size_class_t *sc) {
+  if (!gc || !sc || sc->total_used == 0) return;
+
+  float util = (float) sc->total_used / (float) sc->total_capacity;
+  // good utilization, don't compact
+  if (util > 0.7f) return;
+
+  live_obj_t *live_objects = (live_obj_t*) malloc(sizeof(live_obj_t) * sc->total_used);
+  if (!live_objects) return;
+
+  size_t live_count = 0;
+  pool_block_t *block = sc->blocks;
+  while (block) {
+    char *slot = (char*) block->memory;
+
+    for (size_t i = 0; i < block->capacity; ++i) {
+      bool in_use = true;
+      obj_header_t *header = (obj_header_t*) slot;
+      free_node_t *free_node = block->free_list;
+
+      while (free_node) {
+        if ((void*) free_node == (void*) header) {
+          in_use = false;
+          break;
+        }
+        free_node = free_node->next;
+      }
+
+      if (in_use) {
+        live_objects[live_count].header = header;
+        live_objects[live_count].data = (void*)(header + 1);
+        live_objects[live_count].block = block;
+        ++live_count;
+      }
+
+      slot += block->slot_size;
+    }
+
+    block = block->next;
+  }
+
+  // shift objects to beginning of the first block
+  block = sc->blocks;
+  char *dest = (char*) block->memory;
+  for (size_t i = 0; i < live_count; ++i) {
+    obj_header_t *old_header = live_objects[i].header;
+    void *old_data = live_objects[i].data;
+
+    obj_header_t *new_header = live_objects[i].header;
+    void *new_data = live_objects[i].data;
+
+    if (old_header != new_header) {
+      memcpy(new_header, old_header, sizeof(obj_header_t) + old_header->size);
+      gc_add_relocation(&gc->compaction, old_data, new_data);
+    }
+
+    dest += block->slot_size;
+    // move to next block if the current block is full
+
+    if (dest >= (char*) block->memory + (block->slot_size * block->capacity)) {
+      block = block->next;
+      if (!block) break;
+      dest = (char*) block->memory;
+    }
+  }
+
+  free(live_objects);
+
+  // rebuild free list for all blocks
+  block = sc->blocks;
+  size_t objects_placed = 0;
+
+  while (block) {
+    block->free_list = NULL;
+    block->used = 0;
+
+    char *slot = (char*) block->memory;
+
+    for (size_t i = 0; i < block->capacity; ++i) {
+      if (objects_placed < live_count) { // slot is used
+
+        ++block->used;
+        ++objects_placed;
+      } else { // slot is available, add to free list
+        free_node_t *free_node = (free_node_t*) slot;
+        free_node->next = block->free_list;
+        block->free_list = free_node;
+      }
+
+      slot += block->slot_size;
+    }
+
+    block = block->next;
+  }
+}
+
+static void gc_update_pointer(compaction_ctx_t *ctx, void **ptr_ref) {
+  if (!ctx || !ptr_ref || !*ptr_ref) return;
+
+  void *new_addr = gc_find_new_address(ctx, *ptr_ref);
+  if (new_addr != *ptr_ref) *ptr_ref = new_addr;
+}
+
+static void gc_update_all_references(gc_t *gc) {
+  if (!gc) return;
+
+  compaction_ctx_t *ctx = &gc->compaction;
+
+  // update roots
+  for (size_t i = 0; i < gc->root_count; ++i) {
+    gc_update_pointer(ctx, &gc->roots[i]);
+  }
+
+  // update reference graph
+  ref_node_t *ref = gc->references;
+  while (ref) {
+    gc_update_pointer(ctx, &ref->from_obj);
+    gc_update_pointer(ctx, &ref->to_obj);
+    ref = ref->next;
+  }
+
+  // update heap bounds
+  gc_update_pointer(ctx, &gc->heap_start);
+  gc_update_pointer(ctx, &gc->heap_end);
+}
+
+bool simple_gc_should_compact(gc_t *gc) {
+  if (!gc || !gc->use_pools) return false;
+
+  // stats
+  size_t total_capacity = 0;
+  size_t total_used = 0;
+  size_t fragmented_classes = 0;
+
+  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
+    size_class_t *sc = &gc->size_classes[i];
+    total_capacity += sc->total_capacity;
+    total_used += sc->total_used;
+
+    if (sc->total_capacity > 0) {
+      float util = (float) sc->total_used / (float) sc->total_capacity;
+      if (util < 0.5f && sc->total_used > 0) {
+        ++fragmented_classes;
+      }
+    }
+  }
+
+  // compact if overall utilization <50% and multiple classes fragmented
+  if (total_capacity > 0) {
+    float overall_util = (float) total_used / (float) total_capacity;
+    return (overall_util < 0.5 && fragmented_classes > 1);
+  }
+  return false;
+}
+
+void simple_gc_compact(gc_t *gc) {
+  if (!gc || !gc->use_pools) return;
+
+  gc->compaction.in_progress = true;
+  gc->compaction.relocations = NULL;
+  gc->compaction.relocation_count = 0;
+
+  size_t bytes_before = gc->heap_used;
+
+  // compact each size class
+  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
+    gc_compact_size_class(gc, &gc->size_classes[i]);
+  }
+  gc_update_all_references(gc);
+  gc_clear_relocations(&gc->compaction);
+
+  gc->compaction.in_progress = false;
+  gc->total_compactions++;
+
+  size_t bytes_after = gc->heap_used;
+  if (bytes_before > bytes_after) {
+    gc->bytes_reclaimed += (bytes_before - bytes_after);
   }
 }
 
