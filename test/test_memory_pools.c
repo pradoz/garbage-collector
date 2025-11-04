@@ -169,7 +169,7 @@ static MunitResult test_large_object_allocation(const MunitParameter params[], v
     munit_assert_int(large[i], ==, (char)i);
   }
 
-  munit_assert_size(gc.large_object_count, ==, 1);
+  munit_assert_size(gc.large_block_count, ==, 1);
 
   simple_gc_destroy(&gc);
   return MUNIT_OK;
@@ -322,16 +322,18 @@ static MunitResult test_mixed_and_large_objects(const MunitParameter params[], v
   strncpy(large1, "foo", 512);
   strncpy(large2, "bar", 512);
   munit_assert_size(simple_gc_object_count(&gc), ==, 4);
-  munit_assert_size(gc.large_object_count, ==, 2);
+  munit_assert_size(gc.large_block_count, ==, 2);
 
   // add small objects as roots
   simple_gc_add_root(&gc, small1);
   simple_gc_add_root(&gc, small2);
 
-  // run garbage collection - large objects should be freed
+  // run garbage collection
+  // - large objects should be marked as free
+  // - large blocks should be kept
   simple_gc_collect(&gc);
   munit_assert_size(simple_gc_object_count(&gc), ==, 2);
-  munit_assert_size(gc.large_object_count, ==, 0);
+  munit_assert_size(gc.large_block_count, ==, 2);
 
   simple_gc_destroy(&gc);
   return MUNIT_OK;
@@ -366,7 +368,7 @@ static MunitResult test_sweep_small_objects(const MunitParameter params[], void 
 
   // should have 10 objects remaining
   munit_assert_size(simple_gc_object_count(&gc), ==, 10);
-  munit_assert_size(gc.large_object_count, ==, 0);
+  munit_assert_size(gc.large_block_count, ==, 0);
 
   // verify objects survived
   for (int i = 0; i < NUM_OBJS; i += 10) {
@@ -395,7 +397,7 @@ static MunitResult test_sweep_large_objects(const MunitParameter params[], void 
   }
 
   munit_assert_size(simple_gc_object_count(&gc), ==, NUM_OBJS);
-  munit_assert_size(gc.large_object_count, ==, NUM_OBJS);
+  munit_assert_size(gc.large_block_count, ==, NUM_OBJS);
 
   // root every 10th object
   for (int i = 0; i < NUM_OBJS; i += 5) {
@@ -407,9 +409,9 @@ static MunitResult test_sweep_large_objects(const MunitParameter params[], void 
   // run garbage collection
   simple_gc_collect(&gc);
 
-  // should have 10 objects remaining
+  // should have 10 objects remaining, blocks are kept for reuse
   munit_assert_size(simple_gc_object_count(&gc), ==, 10);
-  munit_assert_size(gc.large_object_count, ==, 10);
+  munit_assert_size(gc.large_block_count, ==, NUM_OBJS);
 
   // verify objects survived
   for (int i = 0; i < NUM_OBJS; i += 5) {
@@ -472,15 +474,137 @@ static MunitResult test_complete_cleanup(const MunitParameter params[], void *da
   }
   munit_assert_size(simple_gc_object_count(&gc), ==, 1100);
 
+  size_t memo_large_blocks_allocated = gc.large_block_count;
+
   // clear all roots
   gc.root_count = 0;
 
-  // run garbage collection, everything should be freed
+  // run garbage collection, objects should be freed and blocks kept for reuse
   simple_gc_collect(&gc);
 
   munit_assert_size(simple_gc_object_count(&gc), ==, 0);
-  munit_assert_size(gc.large_object_count, ==, 0);
   munit_assert_size(gc.heap_used, ==, 0);
+  munit_assert_size(gc.large_block_count, ==, memo_large_blocks_allocated);
+
+  simple_gc_destroy(&gc);
+  return MUNIT_OK;
+}
+
+static MunitResult test_large_object_pool(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  gc_t gc;
+  simple_gc_init(&gc, 1024 * 1024);
+
+  // Allocate large object (256-4096 bytes)
+  char *large = (char*)simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 512);
+  munit_assert_not_null(large);
+
+  // Fill and verify
+  for (int i = 0; i < 512; i++) {
+    large[i] = (char)i;
+  }
+  for (int i = 0; i < 512; i++) {
+    munit_assert_int(large[i], ==, (char)i);
+  }
+
+  munit_assert_size(gc.large_block_count, ==, 1);
+
+  simple_gc_destroy(&gc);
+  return MUNIT_OK;
+}
+
+static MunitResult test_huge_object_mmap(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  gc_t gc;
+  simple_gc_init(&gc, 10 * 1024 * 1024);
+
+  // Allocate huge object (>4KB)
+  size_t huge_size = 8192;
+  char *huge = (char*)simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, huge_size);
+  munit_assert_not_null(huge);
+
+  // Fill and verify
+  for (size_t i = 0; i < huge_size; i++) {
+    huge[i] = (char)(i % 256);
+  }
+  for (size_t i = 0; i < huge_size; i++) {
+    munit_assert_int(huge[i], ==, (char)(i % 256));
+  }
+
+  munit_assert_size(gc.huge_object_count, ==, 1);
+
+  simple_gc_destroy(&gc);
+  return MUNIT_OK;
+}
+
+static MunitResult test_large_object_reuse(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  gc_t gc;
+  simple_gc_init(&gc, 1024 * 1024);
+
+  // Allocate and free large object
+  char *large1 = (char*)simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 512);
+  munit_assert_not_null(large1);
+  large1[0] = 'A';
+
+  size_t block_count_before = gc.large_block_count;
+
+  // Collect (no roots - should mark as free)
+  simple_gc_collect(&gc);
+  munit_assert_size(simple_gc_object_count(&gc), ==, 0);
+
+  // Block should still exist but marked as free
+  munit_assert_size(gc.large_block_count, ==, block_count_before);
+
+  // Allocate again - should reuse block
+  char *large2 = (char*)simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 512);
+  munit_assert_not_null(large2);
+  large2[0] = 'B';
+
+  // Should not have allocated new block
+  munit_assert_size(gc.large_block_count, ==, block_count_before);
+
+  simple_gc_destroy(&gc);
+  return MUNIT_OK;
+}
+
+static MunitResult test_mixed_sizes(const MunitParameter params[], void *data) {
+  (void)params;
+  (void)data;
+
+  gc_t gc;
+  simple_gc_init(&gc, 10 * 1024 * 1024);
+
+  // Allocate mix of sizes
+  void *tiny = simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, 8);      // Pool
+  void *small = simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, 64);    // Pool
+  void *large = simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 512);       // Large pool
+  void *huge = simple_gc_alloc(&gc, OBJ_TYPE_ARRAY, 8192);       // mmap
+
+  munit_assert_not_null(tiny);
+  munit_assert_not_null(small);
+  munit_assert_not_null(large);
+  munit_assert_not_null(huge);
+
+  munit_assert_size(simple_gc_object_count(&gc), ==, 4);
+  munit_assert_size(gc.large_block_count, ==, 1);
+  munit_assert_size(gc.huge_object_count, ==, 1);
+
+  // Add all as roots
+  simple_gc_add_root(&gc, tiny);
+  simple_gc_add_root(&gc, small);
+  simple_gc_add_root(&gc, large);
+  simple_gc_add_root(&gc, huge);
+
+  // Collect - all should survive
+  simple_gc_collect(&gc);
+  munit_assert_size(simple_gc_object_count(&gc), ==, 4);
 
   simple_gc_destroy(&gc);
   return MUNIT_OK;
@@ -505,7 +629,8 @@ static MunitResult test_statistics(const MunitParameter params[], void *data) {
   munit_assert_size(stats.object_count, ==, 10);
   munit_assert_size(stats.total_allocations, ==, 10);
   munit_assert_size(stats.total_collections, ==, 0);
-  munit_assert_size(stats.large_object_count, ==, 0);
+  munit_assert_size(stats.large_block_count, ==, 0);
+  munit_assert_size(stats.huge_object_count, ==, 0);
   munit_assert_size(stats.pool_blocks_allocated, ==, 1);
 
   // run garbage collection
@@ -564,7 +689,7 @@ static MunitResult test_allocation_performance(const MunitParameter params[], vo
   printf("Speedup:      %.2fx\n", malloc_time / pool_time);
   printf("==============================\n\n");
 
-  // pool should be faster
+  // pool should be faster (too small size for now?)
   // munit_assert_double(pool_time, <, malloc_time);
 
   simple_gc_destroy(&gc_pool);
@@ -584,7 +709,7 @@ static MunitResult test_collection_performance(const MunitParameter params[], vo
   gc_t gc;
   simple_gc_init(&gc, 10 * 1024 * 1024);
 
-  // Allocate many objects
+  // allocate many objects
   int *objs[NUM_OBJS];
   for (int i = 0; i < NUM_OBJS; ++i) {
     objs[i] = (int*)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
@@ -592,7 +717,7 @@ static MunitResult test_collection_performance(const MunitParameter params[], vo
     simple_gc_add_root(&gc, objs[i]);
   }
 
-  // Benchmark collection
+  // benchmark collection
   clock_t start = clock();
   simple_gc_collect(&gc);
   clock_t end = clock();
@@ -604,7 +729,7 @@ static MunitResult test_collection_performance(const MunitParameter params[], vo
   printf("Per object:   %.2f ns\n", (time * 1e9) / NUM_OBJS);
   printf("==============================\n\n");
 
-  // All objects should survive
+  // all objects should survive
   munit_assert_size(simple_gc_object_count(&gc), ==, NUM_OBJS);
 
   simple_gc_destroy(&gc);
@@ -630,6 +755,10 @@ static MunitTest tests[] = {
   {"/sweep_large_objects", test_sweep_large_objects, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/fragmentation_reuse", test_fragmentation_reuse, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/complete_cleanup", test_complete_cleanup, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/mixed_sizes", test_mixed_sizes, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/large_object_reuse", test_large_object_reuse, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/huge_object_mmap", test_huge_object_mmap, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/large_object_pool", test_large_object_pool, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/statistics", test_statistics, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/allocation_performance", test_allocation_performance, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {"/collection_performance", test_collection_performance, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},

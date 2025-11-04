@@ -13,7 +13,10 @@
 // memory pools
 #define GC_NUM_SIZE_CLASSES 6
 #define GC_POOL_BLOCK_SIZE 4096  // 4KB blocks
-                                 //
+#define GC_LARGE_OBJECT_THRESHOLD 256
+#define GC_HUGE_OBJECT_THRESHOLD 4096
+#define GC_SIZE_MAX 1024 * 1024 * 5  // 5 MB
+
 
 extern const size_t GC_SIZE_CLASS_SIZES[GC_NUM_SIZE_CLASSES];
 
@@ -22,6 +25,8 @@ typedef struct obj_header obj_header_t;
 typedef struct gc_context gc_t;
 typedef struct reference_node ref_node_t;
 typedef struct size_class size_class_t;
+typedef struct large_block large_block_t;
+typedef struct huge_object huge_object_t;
 
 
 typedef enum {
@@ -69,6 +74,7 @@ typedef struct gc_context {
   size_t root_count;
   size_t root_capacity;
   ref_node_t *references;
+
   // stack scanning
   void *stack_bottom;  // highest address (architecture assumption)
   bool auto_root_scan_enabled;
@@ -80,8 +86,10 @@ typedef struct gc_context {
   // memory pools
   size_class_t size_classes[GC_NUM_SIZE_CLASSES];
   bool use_pools;
-  obj_header_t *large_objects; // large objects are too big for pools
-  size_t large_object_count;
+  large_block_t *large_blocks;
+  size_t large_block_count;
+  huge_object_t *huge_objects;
+  size_t huge_object_count;
 
   // statistics
   size_t total_allocations;
@@ -90,22 +98,39 @@ typedef struct gc_context {
   size_t total_bytes_freed;
 } gc_t;
 
-typedef struct gc_stats {
-  size_t object_count;
-  size_t heap_used;
-  size_t heap_capacity;
-  size_t total_allocations;
-  size_t total_collections;
-  size_t large_object_count;
-  size_t pool_blocks_allocated;
-  size_t size_class_stats[GC_NUM_SIZE_CLASSES];
-} gc_stats_t;
+typedef struct large_block {
+  void *memory;
+  size_t size;
+  bool in_use;
+  obj_header_t *header;
+  large_block_t *next;
+} large_block_t;
+
+// >GC_HUGE_OBJECT_THRESHOLD, uses mmap
+typedef struct huge_object {
+  void *memory;
+  size_t size;
+  obj_header_t *header;
+  huge_object_t *next;
+} huge_object_t;
 
 typedef struct reference_node {
   void *from_obj;
   void *to_obj;
   struct reference_node *next;
 } ref_node_t;
+
+typedef struct gc_stats {
+  size_t object_count;
+  size_t heap_used;
+  size_t heap_capacity;
+  size_t total_allocations;
+  size_t total_collections;
+  size_t large_block_count;
+  size_t huge_object_count;
+  size_t pool_blocks_allocated;
+  size_t size_class_stats[GC_NUM_SIZE_CLASSES];
+} gc_stats_t;
 
 
 const char *simple_gc_version(void);
@@ -159,6 +184,8 @@ pool_block_t* gc_create_pool_block(size_t slot_size, size_t capacity);
 void* gc_alloc_from_block(pool_block_t *block, obj_type_t type, size_t size);
 void* gc_alloc_from_size_class(gc_t *gc, size_class_t* sc, obj_type_t type, size_t size);
 void* gc_alloc_large(gc_t *gc, obj_type_t type, size_t size);
+void* gc_alloc_large_object(gc_t *gc, obj_type_t type, size_t size);
+void* gc_alloc_huge_object(gc_t *gc, obj_type_t type, size_t size);
 bool gc_init_size_class(size_class_t *sc, size_t object_size);
 bool gc_init_pools(gc_t *gc);
 void gc_free_pool_block(pool_block_t *block);
@@ -169,6 +196,7 @@ obj_header_t* gc_find_header_in_pools(gc_t *gc, void *ptr);
 void gc_free_to_pool(gc_t *gc, obj_header_t *header);
 void gc_sweep_pools(gc_t *gc);
 void gc_sweep_large_objects(gc_t *gc);
+void gc_sweep_huge_objects(gc_t *gc);
 
 void simple_gc_get_stats(gc_t *gc, gc_stats_t *stats);
 void simple_gc_print_stats(gc_t *gc);

@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <sys/mman.h>
 
 
 // object sizes (excluding header)
@@ -134,24 +135,118 @@ void* gc_alloc_from_size_class(gc_t *gc, size_class_t* sc, obj_type_t type, size
   return ptr;
 }
 
-void* gc_alloc_large(gc_t *gc, obj_type_t type, size_t size) {
-  if (!gc || size == 0) return NULL;
+void* gc_alloc_large_object(gc_t *gc, obj_type_t type, size_t size) {
+  if (!gc
+      || size <= GC_LARGE_OBJECT_THRESHOLD
+      || size >= GC_HUGE_OBJECT_THRESHOLD) return NULL;
 
+  // look for a free block that fits the size
+  large_block_t *block = gc->large_blocks;
+  large_block_t *best_fit = NULL;
+  size_t best_fit_waste = GC_SIZE_MAX;
+
+  while (block) {
+    if (!block->in_use && block->size >= size) {
+      size_t waste = block->size - size;
+      if (waste < best_fit_waste) {
+        best_fit = block;
+        best_fit_waste = waste;
+      }
+    }
+    block = block->next;
+  }
+
+  if (best_fit) { // try to reuse existing block
+    best_fit->in_use = true;
+
+    obj_header_t *header = best_fit->header;
+    if (!simple_gc_init_header(header, type, size)) {
+      best_fit->in_use = false;
+      return NULL;
+    }
+    return (void*)(header + 1);
+  }
+
+  // otherwise, try to allocate a new block
   size_t total_size = sizeof(obj_header_t) + size;
-  obj_header_t *header = (obj_header_t*) malloc(total_size);
+  void* memory = malloc(total_size);
+  if (!memory) return NULL;
 
-  if (!header) return NULL;
-  if (!simple_gc_init_header(header, type, size)) {
-    free(header);
+  large_block_t *new_block = (large_block_t*) malloc(sizeof(large_block_t));
+  if (!new_block) {
+    free(memory);
     return NULL;
   }
 
-  header->next = gc->large_objects;
-  gc->large_objects = header;
-  gc->large_object_count++;
+  new_block->memory = memory;
+  new_block->size = size;
+  new_block->in_use = true;
+  new_block->header = (obj_header_t*) memory;
+  new_block->next = gc->large_blocks;
 
-  return (void*)(header + 1);
+  gc->large_blocks = new_block;
+  gc->large_block_count++;
+
+  if (!simple_gc_init_header(new_block->header, type, size)) {
+    free(memory);
+    free(new_block);
+    return NULL;
+  }
+
+  return (void*)(new_block->header + 1);
 }
+
+void* gc_alloc_huge_object(gc_t *gc, obj_type_t type, size_t size) {
+  if (!gc || size < GC_HUGE_OBJECT_THRESHOLD) return NULL;
+
+  size_t total_size = sizeof(obj_header_t) + size;
+
+  // round up to page size
+  size_t page_size = 4096;
+  size_t pages = (total_size + page_size - 1) / page_size;
+  size_t alloc_size = pages * page_size;
+
+  void *memory = mmap(NULL, alloc_size,
+      PROT_READ | PROT_WRITE,
+      MAP_PRIVATE | MAP_ANONYMOUS,
+      -1, 0);
+
+  if (memory == MAP_FAILED) return NULL;
+
+  huge_object_t *huge = (huge_object_t*) malloc(sizeof(huge_object_t));
+  if (!huge) {
+    munmap(memory, alloc_size);
+    return NULL;
+  }
+
+  huge->memory = memory;
+  huge->size = alloc_size;
+  huge->header = (obj_header_t*) memory;
+  huge->next = gc->huge_objects;
+
+  gc->huge_objects = huge;
+  gc->huge_object_count++;
+
+  if (!simple_gc_init_header(huge->header, type, size)) {
+    munmap(memory, alloc_size);
+    free(huge);
+    return NULL;
+  }
+
+  return (void*)(huge->header + 1);
+}
+
+void* gc_alloc_large(gc_t *gc, obj_type_t type, size_t size) {
+  if (!gc || size <= GC_LARGE_OBJECT_THRESHOLD) return NULL;
+
+  if (size >= GC_HUGE_OBJECT_THRESHOLD) {
+    return gc_alloc_huge_object(gc, type, size);
+  }
+
+  // if we get here, its a large object
+  return gc_alloc_large_object(gc, type, size);
+}
+
 
 static void update_heap_bounds(gc_t *gc, void *ptr, size_t size) {
   if (!gc || !ptr) return;
@@ -263,8 +358,10 @@ bool gc_init_pools(gc_t *gc) {
   }
 
   gc->use_pools = true;
-  gc->large_objects = NULL;
-  gc->large_object_count = 0;
+  gc->large_blocks = NULL;
+  gc->large_block_count = 0;
+  gc->huge_objects = NULL;
+  gc->huge_object_count = 0;
 
   return true;
 }
@@ -348,15 +445,29 @@ void gc_destroy_pools(gc_t* gc) {
     gc_destroy_size_class(&gc->size_classes[i]);
   }
 
-  obj_header_t *curr = gc->large_objects;
-  while (curr) {
-    obj_header_t *old = curr;
-    curr = curr->next;
-    free(old);
+  // free large blocks
+  large_block_t *block = gc->large_blocks;
+  while (block) {
+    large_block_t *next = block->next;
+    if (block->memory) free(block->memory);
+    free(block);
+    block = next;
   }
 
-  gc->large_objects = NULL;
-  gc->large_object_count = 0;
+  // free huge objects
+  huge_object_t *huge = gc->huge_objects;
+  while (huge) {
+    huge_object_t  *next = huge->next;
+    if (huge->memory) munmap(huge->memory, huge->size);
+    free(huge);
+    huge = next;
+  }
+
+  // reset bookkeeping
+  gc->large_blocks = NULL;
+  gc->large_block_count = 0;
+  gc->huge_objects = NULL;
+  gc->huge_object_count = 0;
 }
 
 void simple_gc_destroy(gc_t* gc) {
@@ -460,30 +571,52 @@ void *simple_gc_alloc(gc_t *gc, obj_type_t type, size_t size) {
   return result;
 }
 
-obj_header_t *simple_gc_find_header(gc_t *gc, void *ptr) {
-  if (!gc || !ptr) {
-    return NULL;
+static obj_header_t *gc_find_header_in_large_objects(gc_t *gc, void* ptr) {
+  if (!gc || !ptr) return NULL;
+
+  large_block_t *block = gc->large_blocks;
+  while (block) {
+    void *found = (void*) (block->header + 1);
+    if (found == ptr) return block->header;
+    block = block->next;
   }
+
+  return NULL;
+}
+
+static obj_header_t *gc_find_header_in_huge_objects(gc_t *gc, void* ptr) {
+  if (!gc || !ptr) return NULL;
+
+  huge_object_t *huge = gc->huge_objects;
+  while (huge) {
+    void *found = (void*) (huge->header + 1);
+    if (found == ptr) return huge->header;
+    huge = huge->next;
+  }
+
+  return NULL;
+}
+
+obj_header_t *simple_gc_find_header(gc_t *gc, void *ptr) {
+  if (!gc || !ptr) return NULL;
 
   // check pools first
   if (gc->use_pools) {
     obj_header_t* header = gc_find_header_in_pools(gc, ptr);
     if (header) return header;
-  }
 
-  // check large objects
-  obj_header_t *large = gc->large_objects;
-  while (large) {
-    void *obj_ptr = (void*)(large + 1);
-    if (obj_ptr == ptr) return large;
-    large = large->next;
+    header = gc_find_header_in_large_objects(gc, ptr);
+    if (header) return header;
+
+    header = gc_find_header_in_huge_objects(gc, ptr);
+    if (header) return header;
   }
 
   // fallback to legacy (non-pool) object management
   obj_header_t* curr = gc->objects;
   while (curr) {
-    void* obj = (void*)(curr + 1);
-    if (obj == ptr) {
+    void* found = (void*)(curr + 1);
+    if (found == ptr) {
       return curr;
     }
     curr = curr->next;
@@ -591,9 +724,11 @@ void simple_gc_sweep(gc_t *gc) {
   if (gc->use_pools) {
     gc_sweep_pools(gc);
     gc_sweep_large_objects(gc);
+    gc_sweep_huge_objects(gc);
     return;  // exit early
   }
 
+  // legacy sweep for non-pool mode
   obj_header_t** curr = &gc->objects;
   while (*curr) {
     if (!(*curr)->marked) { // unreachable
@@ -881,29 +1016,63 @@ void gc_sweep_pools(gc_t *gc) {
 void gc_sweep_large_objects(gc_t *gc) {
   if (!gc) return;
 
-  obj_header_t *prev = NULL;
-  obj_header_t *curr = gc->large_objects;
-  while (curr) {
+  // large_block_t *prev = NULL;
+  large_block_t *block = gc->large_blocks;
+  while (block) {
+    if (block->in_use) {
+      obj_header_t *header = block->header;
 
-    if (!curr->marked) {
+      if (!header->marked) {
+        // unmarked, mark as free so we can reuse it
+        block->in_use = false;
+        gc->object_count--;
+        gc->heap_used -= (sizeof(obj_header_t) + header->size);
+      } else {
+        // marked, unmark for next cycle
+        header->marked = false;
+      }
+
+      // prev = block;
+      block = block->next;
+    } else {
+      // block is not in use - could be freed if we want aggressive cleanup
+      // for now, keep it for reuse
+      // prev = block;
+      block = block->next;
+    }
+  }
+}
+
+void gc_sweep_huge_objects(gc_t *gc) {
+  if (!gc) return;
+
+  huge_object_t *prev = NULL;
+  huge_object_t *object = gc->huge_objects;
+  while (object) {
+    obj_header_t *header = object->header;
+
+    if (!header->marked) {
       // unmarked, free it
-      obj_header_t *to_free = curr;
-      curr = curr->next;
+      huge_object_t *to_free = object;
+      object = object->next;
 
       if (!prev) {
-        gc->large_objects = curr;
+        gc->huge_objects = object;
       } else {
-        prev->next = curr;
+        prev->next = object;
       }
 
       gc->object_count--;
-      gc->large_object_count--;
-      gc->heap_used -= (sizeof(obj_header_t) + to_free->size);
+      gc->huge_object_count--;
+      gc->heap_used -= to_free->size;
+      // gc->heap_used -= (sizeof(obj_header_t) + to_free->size);
+      munmap(to_free->memory, to_free->size);
       free(to_free);
     } else {
-      // marked, unmark and move to next
-      curr->marked = false;
-      curr = curr->next;
+      // marked, unmark for next cycle
+      header->marked = false;
+      prev = object;
+      object = object->next;
     }
   }
 }
@@ -917,7 +1086,8 @@ void simple_gc_get_stats(gc_t *gc, gc_stats_t *stats) {
   stats->heap_capacity = gc->heap_capacity;
   stats->total_allocations = gc->total_allocations;
   stats->total_collections = gc->total_collections;
-  stats->large_object_count = gc->large_object_count;
+  stats->large_block_count = gc->large_block_count;
+  stats->huge_object_count = gc->huge_object_count;
 
   stats->pool_blocks_allocated = 0;
   for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
@@ -944,7 +1114,8 @@ void simple_gc_print_stats(gc_t *gc) {
   printf("Heap capacity:    %zu bytes\n", stats.heap_capacity);
   printf("Total allocs:     %zu\n", stats.total_allocations);
   printf("Total collections:%zu\n", stats.total_collections);
-  printf("Large objects:    %zu\n", stats.large_object_count);
+  printf("Large blocks:     %zu\n", stats.large_block_count);
+  printf("Huge objects:     %zu\n", stats.huge_object_count);
   printf("Pool blocks:      %zu\n", stats.pool_blocks_allocated);
 
   printf("\nSize class allocations:\n");

@@ -343,6 +343,7 @@ static MunitTest tests[] = {
     {"/gc_stack_auto_collect", test_fully_automatic_collection, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_register_scanning", test_register_scanning, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {"/gc_stack_scan_perf", test_stack_scan_performance, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+
     {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}};
 
 static const MunitSuite suite = {"/simple_gc", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};
