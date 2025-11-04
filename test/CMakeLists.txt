@@ -61,3 +61,15 @@ target_include_directories(test_compaction PRIVATE
   munit
 )
 add_test(NAME test_compaction COMMAND test_compaction)
+
+# memory pressure
+add_executable(test_memory_pressure
+  test_memory_pressure.c
+  munit/munit.c
+)
+target_link_libraries(test_memory_pressure simple_gc)
+target_include_directories(test_memory_pressure PRIVATE
+  ${CMAKE_SOURCE_DIR}/include
+  munit
+)
+add_test(NAME test_memory_pressure COMMAND test_memory_pressure)

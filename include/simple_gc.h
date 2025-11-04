@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 
 // versioning
 #define SIMPLE_GC_VERSION_MAJOR 0
@@ -23,6 +24,7 @@ extern const size_t GC_SIZE_CLASS_SIZES[GC_NUM_SIZE_CLASSES];
 
 typedef struct obj_header obj_header_t;
 typedef struct gc_context gc_t;
+typedef struct gc_config gc_config_t;
 typedef struct reference_node ref_node_t;
 
 typedef struct size_class size_class_t;
@@ -40,6 +42,14 @@ typedef enum {
   OBJ_TYPE_ARRAY,
   OBJ_TYPE_STRUCT,
 } obj_type_t;
+
+typedef enum {
+  GC_PRESSURE_NONE = 0,
+  GC_PRESSURE_LOW = 1,
+  GC_PRESSURE_MEDIUM = 2,
+  GC_PRESSURE_HIGH = 3,
+  GC_PRESSURE_CRITICAL = 4,
+} gc_pressure_t;
 
 typedef struct obj_header {
   obj_type_t type;
@@ -88,6 +98,14 @@ typedef struct live_obj {
     pool_block_t *block;
 } live_obj_t;
 
+typedef struct gc_config {
+  bool auto_collect;
+  float collect_threshold;
+  bool auto_expand_pools;
+  bool auto_shrink_pools;
+  size_t expansion_trigger;
+} gc_config_t;
+
 typedef struct gc_context {
   obj_header_t *objects; // linked-list
   size_t object_count;
@@ -114,6 +132,13 @@ typedef struct gc_context {
   huge_object_t *huge_objects;
   size_t huge_object_count;
   compaction_ctx_t compaction;
+
+  // memory pressure
+  gc_config_t config;
+  gc_pressure_t pressure;
+  size_t allocs_since_collect;
+  size_t alloc_rate; // estimate
+  clock_t last_collect_time;
 
   // statistics
   size_t total_allocations;
@@ -212,6 +237,12 @@ void gc_free_to_pool(gc_t *gc, obj_header_t *header);
 bool simple_gc_should_compact(gc_t *gc);
 void simple_gc_compact(gc_t *gc);
 
+// memory pressure
+gc_pressure_t simple_gc_check_pressure(gc_t *gc);
+void simple_gc_set_config(gc_t *gc, gc_config_t *config);
+void simple_gc_auto_tune(gc_t *gc);
+
+// stats
 void simple_gc_get_stats(gc_t *gc, gc_stats_t *stats);
 void simple_gc_print_stats(gc_t *gc);
 

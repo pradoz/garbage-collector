@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <time.h>
 
 
 // object sizes (excluding header)
@@ -366,6 +367,16 @@ static bool gc_init_pools(gc_t *gc) {
   return true;
 }
 
+static gc_config_t gc_default_config(void) {
+  gc_config_t config;
+  config.auto_collect = true;
+  config.collect_threshold = 0.75f;
+  config.auto_expand_pools = true;
+  config.auto_shrink_pools = true;
+  config.expansion_trigger = 100;
+  return config;
+}
+
 bool simple_gc_init(gc_t* gc, size_t init_capacity) {
   if (!gc || init_capacity == 0) {
     return false;
@@ -402,6 +413,13 @@ bool simple_gc_init(gc_t* gc, size_t init_capacity) {
     free(gc->roots);
     return false;
   }
+
+  // memory pressure
+  gc->config = gc_default_config();
+  gc->pressure = GC_PRESSURE_NONE;
+  gc->allocs_since_collect = 0;
+  gc->alloc_rate = 0;
+  gc->last_collect_time = clock();
 
   // stats
   gc->total_allocations = 0;
@@ -516,16 +534,33 @@ size_t simple_gc_heap_used(const gc_t *gc) {
   return gc ? gc->heap_used : 0;
 }
 
+static void gc_update_pressure(gc_t *gc) {
+  if (!gc) return;
+  gc->pressure = simple_gc_check_pressure(gc);
+}
+
+static bool gc_should_auto_collect(gc_t *gc) {
+  if (!gc) return false;
+
+  float utilization = (float) gc->heap_used / (float) gc->heap_capacity;
+  if (utilization >= gc->config.collect_threshold) return true;
+  if (utilization >= GC_PRESSURE_CRITICAL) return true;
+  // TODO: use config, make less heuristic?
+  if (gc->allocs_since_collect > 1000) return true;
+
+  return false;
+}
+
 void *simple_gc_alloc(gc_t *gc, obj_type_t type, size_t size) {
-  if (!gc || size == 0) {
-    return NULL;
-  }
+  if (!gc || size == 0) return NULL;
+
+  // auto-collect if pressure indicates to do so
+  gc_update_pressure(gc);
+  if (gc_should_auto_collect(gc)) simple_gc_collect(gc);
 
   // capacity check
   size_t total_size = sizeof(obj_header_t) + size;
-  if (total_size + gc->heap_used > gc->heap_capacity) {
-    return NULL;
-  }
+  if (total_size + gc->heap_used > gc->heap_capacity) return NULL;
 
   void *result = NULL;
 
@@ -557,12 +592,16 @@ void *simple_gc_alloc(gc_t *gc, obj_type_t type, size_t size) {
 
   // bookkeeping
   if (result) {
+    // memory pressure
+    gc->allocs_since_collect++;
+    gc->total_allocations++;
+
+    // heap
     gc->object_count++;
     gc->heap_used += total_size;
     update_heap_bounds(gc, result, size);
 
     // stats
-    gc->total_allocations++;
     gc->total_bytes_allocated += total_size;
   }
   return result;
@@ -891,7 +930,7 @@ void simple_gc_collect(gc_t *gc) {
     return;
   }
 
-  // stats
+  clock_t start = clock();
   gc->total_collections++;
 
   simple_gc_mark_roots(gc);
@@ -907,6 +946,14 @@ void simple_gc_collect(gc_t *gc) {
   if (simple_gc_should_compact(gc)) {
     simple_gc_compact(gc);
   }
+
+  // reset memory pressure tracking
+  gc->allocs_since_collect = 0;
+  gc->last_collect_time = clock();
+  clock_t elapsed = gc->last_collect_time - start;
+  if (elapsed > 0) gc->alloc_rate = (gc->total_allocations * CLOCKS_PER_SEC) / elapsed;
+
+  simple_gc_auto_tune(gc);
 }
 
 bool simple_gc_add_reference(gc_t *gc, void *from_ptr, void *to_ptr) {
@@ -1299,6 +1346,78 @@ void simple_gc_compact(gc_t *gc) {
   size_t bytes_after = gc->heap_used;
   if (bytes_before > bytes_after) {
     gc->bytes_reclaimed += (bytes_before - bytes_after);
+  }
+}
+
+// memory pressure
+gc_pressure_t simple_gc_check_pressure(gc_t *gc) {
+  if (!gc) return GC_PRESSURE_NONE;
+
+  float utilization = (float) gc->heap_used / (float) gc->heap_capacity;
+  if (utilization >= 0.95f) return GC_PRESSURE_CRITICAL;
+  if (utilization >= 0.85f) return GC_PRESSURE_HIGH;
+  if (utilization >= 0.70f) return GC_PRESSURE_MEDIUM;
+  if (utilization >= 0.50f) return GC_PRESSURE_LOW;
+  return GC_PRESSURE_NONE;
+}
+
+static bool gc_expand_pool(gc_t *gc, size_class_t *sc) {
+  if (!gc || !sc) return false;
+
+  size_t current_capacity = 0;
+  pool_block_t *block = sc->blocks;
+  while (block) {
+    current_capacity += block->capacity;
+    block = block->next;
+  }
+
+  size_t new_capacity = current_capacity > 0 ? current_capacity : 64;
+
+  pool_block_t *new_block = gc_create_pool_block(sc->slot_size, new_capacity);
+  if (!new_block) return false;
+
+  // add new block to size class
+  new_block->next = sc->blocks;
+  sc->blocks = new_block;
+  sc->total_capacity += new_block->capacity;
+
+  return true;
+}
+
+static void gc_shrink_pool(gc_t *gc, size_class_t *sc) {
+  if (!gc || !sc) return;
+
+  pool_block_t **curr = &sc->blocks;
+  while (*curr) {
+    pool_block_t *block = *curr;
+
+    // keep >=1 block
+    if (block->next && block->used == 0) {
+      // block is empty, remove it
+      *curr = block->next;
+      sc->total_capacity -= block->capacity;
+      gc_free_pool_block(block);
+    } else {
+      curr = &block->next;
+    }
+  }
+}
+
+void simple_gc_set_config(gc_t *gc, gc_config_t *config) {
+  if (!gc || !config) return;
+  gc->config = *config;
+}
+
+void simple_gc_auto_tune(gc_t *gc) {
+  if (!gc || !gc->use_pools) return;
+
+  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
+    size_class_t *sc = &gc->size_classes[i];
+    if (sc->total_capacity == 0) continue;
+
+    float utilization = (float) sc->total_used / (float) sc->total_capacity;
+    if (gc->config.auto_expand_pools && utilization > 0.9f) gc_expand_pool(gc, sc);
+    if (gc->config.auto_shrink_pools && utilization < 0.2f) gc_shrink_pool(gc, sc);
   }
 }
 

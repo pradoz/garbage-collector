@@ -1,6 +1,6 @@
 BUILD_DIR = build
 
-TESTS = test_simple_gc test_visualizer test_stack_scan test_gc_platform test_memory_pools
+TESTS = test_simple_gc test_visualizer test_stack_scan test_memory_pools test_compaction test_memory_pressure
 
 .PHONY: all build test test-verbose example clean
 
