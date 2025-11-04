@@ -1,6 +1,7 @@
 #include "munit.h"
 #include "simple_gc.h"
 
+
 static MunitResult test_init_header(const MunitParameter params[], void *data) {
   (void)params;
   (void)data;

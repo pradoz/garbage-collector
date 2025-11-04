@@ -75,7 +75,7 @@ pool_block_t* gc_create_pool_block(size_t slot_size, size_t capacity) {
   return block;
 }
 
-void* gc_alloc_from_block(pool_block_t *block, obj_type_t type, size_t size) {
+static void *gc_alloc_from_block(pool_block_t *block, obj_type_t type, size_t size) {
   if (!block || !block->free_list) return NULL;
 
   // pop from free list
@@ -95,7 +95,7 @@ void* gc_alloc_from_block(pool_block_t *block, obj_type_t type, size_t size) {
   return (void*)(header + 1);
 }
 
-void* gc_alloc_from_size_class(gc_t *gc, size_class_t* sc, obj_type_t type, size_t size) {
+static void* gc_alloc_from_size_class(gc_t *gc, size_class_t* sc, obj_type_t type, size_t size) {
   if (!gc || !sc) return NULL;
 
   // try to allocate from existing blocks
@@ -135,7 +135,7 @@ void* gc_alloc_from_size_class(gc_t *gc, size_class_t* sc, obj_type_t type, size
   return ptr;
 }
 
-void* gc_alloc_large_object(gc_t *gc, obj_type_t type, size_t size) {
+static void *gc_alloc_large_object(gc_t *gc, obj_type_t type, size_t size) {
   if (!gc
       || size <= GC_LARGE_OBJECT_THRESHOLD
       || size >= GC_HUGE_OBJECT_THRESHOLD) return NULL;
@@ -196,7 +196,7 @@ void* gc_alloc_large_object(gc_t *gc, obj_type_t type, size_t size) {
   return (void*)(new_block->header + 1);
 }
 
-void* gc_alloc_huge_object(gc_t *gc, obj_type_t type, size_t size) {
+static void *gc_alloc_huge_object(gc_t *gc, obj_type_t type, size_t size) {
   if (!gc || size < GC_HUGE_OBJECT_THRESHOLD) return NULL;
 
   size_t total_size = sizeof(obj_header_t) + size;
@@ -236,7 +236,7 @@ void* gc_alloc_huge_object(gc_t *gc, obj_type_t type, size_t size) {
   return (void*)(huge->header + 1);
 }
 
-void* gc_alloc_large(gc_t *gc, obj_type_t type, size_t size) {
+static void *gc_alloc_large(gc_t *gc, obj_type_t type, size_t size) {
   if (!gc || size <= GC_LARGE_OBJECT_THRESHOLD) return NULL;
 
   if (size >= GC_HUGE_OBJECT_THRESHOLD) {
@@ -333,7 +333,7 @@ gc_t *simple_gc_new_auto(size_t init_capacity) {
   return gc;
 }
 
-bool gc_init_size_class(size_class_t *sc, size_t object_size) {
+static bool gc_init_size_class(size_class_t *sc, size_t object_size) {
   if (!sc) return false;
 
   // initialize a single size class
@@ -347,7 +347,7 @@ bool gc_init_size_class(size_class_t *sc, size_t object_size) {
   return true;
 }
 
-bool gc_init_pools(gc_t *gc) {
+static bool gc_init_pools(gc_t *gc) {
   if (!gc) return false;
 
   // initialize all size classes
@@ -421,7 +421,7 @@ void gc_free_pool_block(pool_block_t *block) {
   free(block);
 }
 
-void gc_destroy_size_class(size_class_t *sc) {
+static void gc_destroy_size_class(size_class_t *sc) {
   if (!sc) return;
 
   pool_block_t *block = sc->blocks;
@@ -429,9 +429,6 @@ void gc_destroy_size_class(size_class_t *sc) {
     pool_block_t *old = block;
     block = block->next;
     gc_free_pool_block(old);
-    // pool_block_t *next = block->next;
-    // gc_free_pool_block(block);
-    // block = next;
   }
 
   sc->blocks = NULL;
@@ -439,7 +436,7 @@ void gc_destroy_size_class(size_class_t *sc) {
   sc->total_used = 0;
 }
 
-void gc_destroy_pools(gc_t* gc) {
+static void gc_destroy_pools(gc_t* gc) {
   if (!gc) return;
   for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
     gc_destroy_size_class(&gc->size_classes[i]);
@@ -597,6 +594,38 @@ static obj_header_t *gc_find_header_in_huge_objects(gc_t *gc, void* ptr) {
   return NULL;
 }
 
+obj_header_t* gc_find_header_in_pools(gc_t *gc, void *ptr) {
+  if (!gc || !ptr) return NULL;
+
+  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
+    size_class_t *sc = &gc->size_classes[i];
+    pool_block_t *block = sc->blocks;
+
+    while (block) {
+      if (gc_pointer_in_block(block, ptr)) {
+        // ptr found in block, find header
+        char *base = (char*) block->memory;
+        char *mem_start = (char*) ptr;
+        ptrdiff_t offset = mem_start - base;
+        size_t slot_index = offset / block->slot_size;
+        char *slot_start = base + (slot_index * block->slot_size);
+
+        obj_header_t *header = (obj_header_t*) slot_start;
+        void *expected_data_ptr = (void*)(header + 1);
+        if (expected_data_ptr == ptr && simple_gc_is_valid_header(header)) {
+          return header;
+        }
+
+        // ptr is in the block but not a valid data pointer
+        return NULL;
+      }
+      block = block->next;
+    }
+  }
+
+  return NULL;
+}
+
 obj_header_t *simple_gc_find_header(gc_t *gc, void *ptr) {
   if (!gc || !ptr) return NULL;
 
@@ -715,6 +744,117 @@ void simple_gc_mark_roots(gc_t *gc) {
 
   for (size_t i = 0; i < gc->root_count; ++i) {
     simple_gc_mark(gc, gc->roots[i]);
+  }
+}
+
+static void gc_sweep_pools(gc_t *gc) {
+  if (!gc) return;
+
+  // sweep size classes
+  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
+    size_class_t *sc = &gc->size_classes[i];
+    pool_block_t *block = sc->blocks;
+
+    while (block) {
+      char *slot = (char*) block->memory;
+
+      for (size_t j = 0; j < block->capacity; ++j) {
+        obj_header_t *header = (obj_header_t*) slot;
+        // slot is in use if not in the free list
+        bool in_use = true;
+        free_node_t *free_node = block->free_list;
+
+        while (free_node) {
+          if ((void*) free_node == (void*) header) {
+            in_use = false;
+            break;
+          }
+          free_node = free_node->next;
+        }
+
+        if (in_use) {
+          // slot is used - check if marked
+          if (!header->marked) {
+            // unmarked, return to pool
+            gc_free_to_pool(gc, header);
+            gc->object_count--;
+            size_t bytes_changed = (sizeof(obj_header_t) + header->size);
+            gc->heap_used -= bytes_changed;
+            gc->total_bytes_freed += bytes_changed;
+          } else {
+            // marked, unmark for next cycle
+            header->marked = false;
+          }
+        }
+
+        slot += block->slot_size;
+      }
+
+      block = block->next;
+    }
+  }
+}
+
+static void gc_sweep_large_objects(gc_t *gc) {
+  if (!gc) return;
+
+  // large_block_t *prev = NULL;
+  large_block_t *block = gc->large_blocks;
+  while (block) {
+    if (block->in_use) {
+      obj_header_t *header = block->header;
+
+      if (!header->marked) {
+        // unmarked, mark as free so we can reuse it
+        block->in_use = false;
+        gc->object_count--;
+        gc->heap_used -= (sizeof(obj_header_t) + header->size);
+      } else {
+        // marked, unmark for next cycle
+        header->marked = false;
+      }
+
+      // prev = block;
+      block = block->next;
+    } else {
+      // block is not in use - could be freed if we want aggressive cleanup
+      // for now, keep it for reuse
+      // prev = block;
+      block = block->next;
+    }
+  }
+}
+
+static void gc_sweep_huge_objects(gc_t *gc) {
+  if (!gc) return;
+
+  huge_object_t *prev = NULL;
+  huge_object_t *object = gc->huge_objects;
+  while (object) {
+    obj_header_t *header = object->header;
+
+    if (!header->marked) {
+      // unmarked, free it
+      huge_object_t *to_free = object;
+      object = object->next;
+
+      if (!prev) {
+        gc->huge_objects = object;
+      } else {
+        prev->next = object;
+      }
+
+      gc->object_count--;
+      gc->huge_object_count--;
+      gc->heap_used -= to_free->size;
+      munmap(to_free->memory, to_free->size);
+      free(to_free);
+    } else {
+      // marked, unmark for next cycle
+      header->marked = false;
+      prev = object;
+      object = object->next;
+    }
   }
 }
 
@@ -907,39 +1047,6 @@ bool gc_pointer_in_block(pool_block_t *block, void *ptr) {
   return (p >= start && p < end);
 }
 
-// TODO: debug
-obj_header_t* gc_find_header_in_pools(gc_t *gc, void *ptr) {
-  if (!gc || !ptr) return NULL;
-
-  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
-    size_class_t *sc = &gc->size_classes[i];
-    pool_block_t *block = sc->blocks;
-
-    while (block) {
-      if (gc_pointer_in_block(block, ptr)) {
-        // ptr found in block, find header
-        char *base = (char*) block->memory;
-        char *mem_start = (char*) ptr;
-        ptrdiff_t offset = mem_start - base;
-        size_t slot_index = offset / block->slot_size;
-        char *slot_start = base + (slot_index * block->slot_size);
-
-        obj_header_t *header = (obj_header_t*) slot_start;
-        void *expected_data_ptr = (void*)(header + 1);
-        if (expected_data_ptr == ptr && simple_gc_is_valid_header(header)) {
-          return header;
-        }
-
-        // ptr is in the block but not a valid data pointer
-        return NULL;
-      }
-      block = block->next;
-    }
-  }
-
-  return NULL;
-}
-
 void gc_free_to_pool(gc_t *gc, obj_header_t *header) {
   if (!gc || !header) return;
 
@@ -962,118 +1069,6 @@ void gc_free_to_pool(gc_t *gc, obj_header_t *header) {
       return;
     }
     block = block->next;
-  }
-}
-
-void gc_sweep_pools(gc_t *gc) {
-  if (!gc) return;
-
-  // sweep size classes
-  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
-    size_class_t *sc = &gc->size_classes[i];
-    pool_block_t *block = sc->blocks;
-
-    while (block) {
-      char *slot = (char*) block->memory;
-
-      for (size_t j = 0; j < block->capacity; ++j) {
-        obj_header_t *header = (obj_header_t*) slot;
-        // slot is in use if not in the free list
-        bool in_use = true;
-        free_node_t *free_node = block->free_list;
-
-        while (free_node) {
-          if ((void*) free_node == (void*) header) {
-            in_use = false;
-            break;
-          }
-          free_node = free_node->next;
-        }
-
-        if (in_use) {
-          // slot is used - check if marked
-          if (!header->marked) {
-            // unmarked, return to pool
-            gc_free_to_pool(gc, header);
-            gc->object_count--;
-            size_t bytes_changed = (sizeof(obj_header_t) + header->size);
-            gc->heap_used -= bytes_changed;
-            gc->total_bytes_freed += bytes_changed;
-          } else {
-            // marked, unmark for next cycle
-            header->marked = false;
-          }
-        }
-
-        slot += block->slot_size;
-      }
-
-      block = block->next;
-    }
-  }
-}
-
-void gc_sweep_large_objects(gc_t *gc) {
-  if (!gc) return;
-
-  // large_block_t *prev = NULL;
-  large_block_t *block = gc->large_blocks;
-  while (block) {
-    if (block->in_use) {
-      obj_header_t *header = block->header;
-
-      if (!header->marked) {
-        // unmarked, mark as free so we can reuse it
-        block->in_use = false;
-        gc->object_count--;
-        gc->heap_used -= (sizeof(obj_header_t) + header->size);
-      } else {
-        // marked, unmark for next cycle
-        header->marked = false;
-      }
-
-      // prev = block;
-      block = block->next;
-    } else {
-      // block is not in use - could be freed if we want aggressive cleanup
-      // for now, keep it for reuse
-      // prev = block;
-      block = block->next;
-    }
-  }
-}
-
-void gc_sweep_huge_objects(gc_t *gc) {
-  if (!gc) return;
-
-  huge_object_t *prev = NULL;
-  huge_object_t *object = gc->huge_objects;
-  while (object) {
-    obj_header_t *header = object->header;
-
-    if (!header->marked) {
-      // unmarked, free it
-      huge_object_t *to_free = object;
-      object = object->next;
-
-      if (!prev) {
-        gc->huge_objects = object;
-      } else {
-        prev->next = object;
-      }
-
-      gc->object_count--;
-      gc->huge_object_count--;
-      gc->heap_used -= to_free->size;
-      // gc->heap_used -= (sizeof(obj_header_t) + to_free->size);
-      munmap(to_free->memory, to_free->size);
-      free(to_free);
-    } else {
-      // marked, unmark for next cycle
-      header->marked = false;
-      prev = object;
-      object = object->next;
-    }
   }
 }
 

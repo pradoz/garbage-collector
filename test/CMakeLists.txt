@@ -49,3 +49,15 @@ target_include_directories(test_memory_pools PRIVATE
   munit
 )
 add_test(NAME test_memory_pools COMMAND test_memory_pools)
+
+# compaction
+add_executable(test_compaction
+  test_compaction.c
+  munit/munit.c
+)
+target_link_libraries(test_compaction simple_gc)
+target_include_directories(test_compaction PRIVATE
+  ${CMAKE_SOURCE_DIR}/include
+  munit
+)
+add_test(NAME test_compaction COMMAND test_compaction)

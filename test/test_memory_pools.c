@@ -6,6 +6,7 @@
 
 
 extern const size_t GC_SIZE_CLASS_SIZES[];
+extern void gc_free_pool_block(pool_block_t *block);
 
 
 static MunitResult test_size_class_selection(const MunitParameter params[], void *data) {
@@ -89,7 +90,7 @@ static MunitResult test_pool_block_creation(const MunitParameter params[], void 
   size_t count = 0;
   free_node_t *node = block->free_list;
   while (node && count < capacity + 1) {  // +1 to detect loops
-    count++;
+    ++count;
     node = node->next;
   }
   munit_assert_size(count, ==, capacity);
