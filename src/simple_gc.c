@@ -1,5 +1,7 @@
 #include "simple_gc.h"
 #include "gc_platform.h"
+#include "gc_pool.h"
+#include "gc_large.h"
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,246 +9,6 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <time.h>
-
-
-// object sizes (excluding header)
-const size_t GC_SIZE_CLASS_SIZES[GC_NUM_SIZE_CLASSES] = {
-  8,    // booleans, small numbers
-  16,   // pointers, small structs
-  32,   // sh-medium
-  64,   // medium
-  128,  // medium-large
-  256   // large (beyond this = large object)
-};
-
-int gc_size_to_class(size_t size) {
-  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
-    if (size <= GC_SIZE_CLASS_SIZES[i]) {
-      return i;
-    }
-  }
-  return -1; // too big for the pool
-}
-
-size_class_t* gc_get_size_class(gc_t *gc, size_t size) {
-  int class_index = gc_size_to_class(size);
-  if (class_index < 0) {
-    return NULL;
-  }
-  return &gc->size_classes[class_index];
-}
-
-pool_block_t* gc_create_pool_block(size_t slot_size, size_t capacity) {
-  if (slot_size == 0 || capacity == 0) return NULL;
-
-  pool_block_t* block = (pool_block_t*) malloc(sizeof(pool_block_t));
-  if (!block) return NULL;
-
-  size_t total_size = slot_size * capacity;
-  block->memory = malloc(total_size);
-  if (!block->memory) {
-    free(block);
-    return NULL;
-  }
-
-  block->slot_size = slot_size;
-  block->capacity = capacity;
-  block->used = 0;
-  block->next = NULL;
-
-  /* Memory layout (e.g., 4 slots of 32 bytes each):
-    when slot_size=32, capacity=4; block->memory:
-    addr:   0x1000    0x1020    0x1040    0x1060
-          |─────────┬─────────┬─────────┬──────────┐
-          | Slot 0  │ Slot 1  │ Slot 2  │ Slot 3   │
-          | next─┐  │ next─┐  │ next─┐  │ next=NULL│
-          |──────v──┴─|────v──┴─|────v──┴─|────────┘
-                 └────^    └────^    └────^
-  */
-  block->free_list = (free_node_t*) block->memory;
-  char *slot = (char*) block->memory;
-  for (size_t i = 0; i < capacity - 1; ++i) {
-    free_node_t *node = (free_node_t*) slot;
-    slot += slot_size;
-    node->next = (free_node_t*) slot;
-  }
-
-  free_node_t *last = (free_node_t*) slot;
-  last->next = NULL;
-  return block;
-}
-
-static void *gc_alloc_from_block(pool_block_t *block, obj_type_t type, size_t size) {
-  if (!block || !block->free_list) return NULL;
-
-  // pop from free list
-  free_node_t *node = block->free_list;
-  block->free_list = node->next;
-  block->used++;
-
-  // node becomes the new object header
-  obj_header_t *header = (obj_header_t*) node;
-  if (!simple_gc_init_header(header, type, size)) {
-    node->next = block->free_list;
-    block->free_list = node;
-    block->used--;
-    return NULL;
-  }
-
-  return (void*)(header + 1);
-}
-
-static void* gc_alloc_from_size_class(gc_t *gc, size_class_t* sc, obj_type_t type, size_t size) {
-  if (!gc || !sc) return NULL;
-
-  // try to allocate from existing blocks
-  pool_block_t *block = sc->blocks;
-  while (block) {
-    if (block->free_list) {
-      void *ptr = gc_alloc_from_block(block, type, size);
-      if (ptr) {
-        sc->total_used++;
-        sc->total_allocated++;
-        return ptr;
-      }
-    }
-    block = block->next;
-  }
-
-  // no space in existing blocks; create a new block
-  size_t slots_per_block = GC_POOL_BLOCK_SIZE / sc->slot_size;
-  if (slots_per_block < 1) {
-    slots_per_block = 1;
-  }
-
-  pool_block_t *new_block = gc_create_pool_block(sc->slot_size, slots_per_block);
-  if (!new_block) return NULL;
-
-  // add to size class and allocate from new block
-  new_block->next = sc->blocks;
-  sc->blocks = new_block;
-  sc->total_capacity += new_block->capacity;
-
-  void *ptr = gc_alloc_from_block(new_block, type, size);
-  if (ptr) {
-    sc->total_used++;
-    sc->total_allocated++;
-  }
-
-  return ptr;
-}
-
-static void *gc_alloc_large_object(gc_t *gc, obj_type_t type, size_t size) {
-  if (!gc
-      || size <= GC_LARGE_OBJECT_THRESHOLD
-      || size >= GC_HUGE_OBJECT_THRESHOLD) return NULL;
-
-  // look for a free block that fits the size
-  large_block_t *block = gc->large_blocks;
-  large_block_t *best_fit = NULL;
-  size_t best_fit_waste = GC_SIZE_MAX;
-
-  while (block) {
-    if (!block->in_use && block->size >= size) {
-      size_t waste = block->size - size;
-      if (waste < best_fit_waste) {
-        best_fit = block;
-        best_fit_waste = waste;
-      }
-    }
-    block = block->next;
-  }
-
-  if (best_fit) { // try to reuse existing block
-    best_fit->in_use = true;
-
-    obj_header_t *header = best_fit->header;
-    if (!simple_gc_init_header(header, type, size)) {
-      best_fit->in_use = false;
-      return NULL;
-    }
-    return (void*)(header + 1);
-  }
-
-  // otherwise, try to allocate a new block
-  size_t total_size = sizeof(obj_header_t) + size;
-  void* memory = malloc(total_size);
-  if (!memory) return NULL;
-
-  large_block_t *new_block = (large_block_t*) malloc(sizeof(large_block_t));
-  if (!new_block) {
-    free(memory);
-    return NULL;
-  }
-
-  new_block->memory = memory;
-  new_block->size = size;
-  new_block->in_use = true;
-  new_block->header = (obj_header_t*) memory;
-  new_block->next = gc->large_blocks;
-
-  gc->large_blocks = new_block;
-  gc->large_block_count++;
-
-  if (!simple_gc_init_header(new_block->header, type, size)) {
-    free(memory);
-    free(new_block);
-    return NULL;
-  }
-
-  return (void*)(new_block->header + 1);
-}
-
-static void *gc_alloc_huge_object(gc_t *gc, obj_type_t type, size_t size) {
-  if (!gc || size < GC_HUGE_OBJECT_THRESHOLD) return NULL;
-
-  size_t total_size = sizeof(obj_header_t) + size;
-
-  // round up to page size
-  size_t page_size = 4096;
-  size_t pages = (total_size + page_size - 1) / page_size;
-  size_t alloc_size = pages * page_size;
-
-  void *memory = mmap(NULL, alloc_size,
-      PROT_READ | PROT_WRITE,
-      MAP_PRIVATE | MAP_ANONYMOUS,
-      -1, 0);
-
-  if (memory == MAP_FAILED) return NULL;
-
-  huge_object_t *huge = (huge_object_t*) malloc(sizeof(huge_object_t));
-  if (!huge) {
-    munmap(memory, alloc_size);
-    return NULL;
-  }
-
-  huge->memory = memory;
-  huge->size = alloc_size;
-  huge->header = (obj_header_t*) memory;
-  huge->next = gc->huge_objects;
-
-  gc->huge_objects = huge;
-  gc->huge_object_count++;
-
-  if (!simple_gc_init_header(huge->header, type, size)) {
-    munmap(memory, alloc_size);
-    free(huge);
-    return NULL;
-  }
-
-  return (void*)(huge->header + 1);
-}
-
-static void *gc_alloc_large(gc_t *gc, obj_type_t type, size_t size) {
-  if (!gc || size <= GC_LARGE_OBJECT_THRESHOLD) return NULL;
-
-  if (size >= GC_HUGE_OBJECT_THRESHOLD) {
-    return gc_alloc_huge_object(gc, type, size);
-  }
-
-  // if we get here, its a large object
-  return gc_alloc_large_object(gc, type, size);
-}
 
 
 static void update_heap_bounds(gc_t *gc, void *ptr, size_t size) {
@@ -274,30 +36,11 @@ const char *simple_gc_version(void) {
 }
 
 bool simple_gc_init_header(obj_header_t *header, obj_type_t type, size_t size) {
-  if (!header || size == 0) {
-    return false;
-  }
-
-  header->type = type;
-  header->size = size;
-  header->marked = false;
-  header->next = NULL;
-  return true;
+  return gc_init_header(header, type, size);
 }
 
 bool simple_gc_is_valid_header(const obj_header_t *header) {
-  if (!header) {
-    return false;
-  }
-
-  if (header->type < OBJ_TYPE_UNKNOWN || header->type > OBJ_TYPE_STRUCT) {
-    return false;
-  }
-
-  if (header->size == 0) {
-    return false;
-  }
-  return true;
+  return gc_is_valid_header(header);
 }
 
 gc_t* simple_gc_new(size_t init_capacity) {
@@ -332,39 +75,6 @@ gc_t *simple_gc_new_auto(size_t init_capacity) {
   }
 
   return gc;
-}
-
-static bool gc_init_size_class(size_class_t *sc, size_t object_size) {
-  if (!sc) return false;
-
-  // initialize a single size class
-  sc->size = object_size;
-  sc->slot_size = sizeof(obj_header_t) + object_size;
-  sc->blocks = NULL;
-  sc->total_capacity = 0;
-  sc->total_used = 0;
-  sc->total_allocated = 0;
-
-  return true;
-}
-
-static bool gc_init_pools(gc_t *gc) {
-  if (!gc) return false;
-
-  // initialize all size classes
-  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
-    if (!gc_init_size_class(&gc->size_classes[i], GC_SIZE_CLASS_SIZES[i])) {
-      return false;
-    }
-  }
-
-  gc->use_pools = true;
-  gc->large_blocks = NULL;
-  gc->large_block_count = 0;
-  gc->huge_objects = NULL;
-  gc->huge_object_count = 0;
-
-  return true;
 }
 
 static gc_config_t gc_default_config(void) {
@@ -409,80 +119,35 @@ bool simple_gc_init(gc_t* gc, size_t init_capacity) {
   gc->heap_end = NULL;
 
   // memory pools
-  if (!gc_init_pools(gc)) {
+  if (!gc_pool_init_all_classes(gc->size_classes)) {
     free(gc->roots);
     return false;
   }
+
+  gc->use_pools = true;
+  gc->large_blocks = NULL;
+  gc->large_block_count = 0;
+  gc->huge_objects = NULL;
+  gc->huge_object_count = 0;
 
   // memory pressure
   gc->config = gc_default_config();
   gc->pressure = GC_PRESSURE_NONE;
   gc->allocs_since_collect = 0;
   gc->alloc_rate = 0;
-  gc->last_collect_time = clock();
+  gc->last_collect_time = 0;
+  gc->last_alloc_time = 0;
+  gc->last_collection_duration = 0;
 
   // stats
   gc->total_allocations = 0;
   gc->total_collections = 0;
   gc->total_bytes_allocated = 0;
   gc->total_bytes_freed = 0;
+  gc->total_compactions = 0;
+  gc->bytes_reclaimed = 0;
 
   return true;
-}
-
-void gc_free_pool_block(pool_block_t *block) {
-  if (!block) return;
-
-  if (block->memory) {
-    free(block->memory);
-  }
-  free(block);
-}
-
-static void gc_destroy_size_class(size_class_t *sc) {
-  if (!sc) return;
-
-  pool_block_t *block = sc->blocks;
-  while (block) {
-    pool_block_t *old = block;
-    block = block->next;
-    gc_free_pool_block(old);
-  }
-
-  sc->blocks = NULL;
-  sc->total_capacity = 0;
-  sc->total_used = 0;
-}
-
-static void gc_destroy_pools(gc_t* gc) {
-  if (!gc) return;
-  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
-    gc_destroy_size_class(&gc->size_classes[i]);
-  }
-
-  // free large blocks
-  large_block_t *block = gc->large_blocks;
-  while (block) {
-    large_block_t *next = block->next;
-    if (block->memory) free(block->memory);
-    free(block);
-    block = next;
-  }
-
-  // free huge objects
-  huge_object_t *huge = gc->huge_objects;
-  while (huge) {
-    huge_object_t  *next = huge->next;
-    if (huge->memory) munmap(huge->memory, huge->size);
-    free(huge);
-    huge = next;
-  }
-
-  // reset bookkeeping
-  gc->large_blocks = NULL;
-  gc->large_block_count = 0;
-  gc->huge_objects = NULL;
-  gc->huge_object_count = 0;
 }
 
 void simple_gc_destroy(gc_t* gc) {
@@ -492,7 +157,17 @@ void simple_gc_destroy(gc_t* gc) {
 
   // free memory pools
   if (gc->use_pools) {
-    gc_destroy_pools(gc);
+    gc_pool_destroy_all_classes(gc->size_classes);
+
+    // free large blocks
+    gc_large_destroy_all(gc->large_blocks);
+    gc->large_blocks = NULL;
+    gc->large_block_count = 0;
+
+    // free huge objects
+    gc_huge_destroy_all(gc->huge_objects);
+    gc->huge_objects = NULL;
+    gc->huge_object_count = 0;
   }
 
   // free gc objects
@@ -543,16 +218,37 @@ static bool gc_should_auto_collect(gc_t *gc) {
   if (!gc) return false;
 
   float utilization = (float) gc->heap_used / (float) gc->heap_capacity;
+
+  // Check against configured threshold
   if (utilization >= gc->config.collect_threshold) return true;
-  if (utilization >= GC_PRESSURE_CRITICAL) return true;
-  // TODO: use config, make less heuristic?
-  if (gc->allocs_since_collect > 1000) return true;
+
+  // Use actual pressure calculation
+  gc_pressure_t pressure = simple_gc_check_pressure(gc);
+  if (pressure >= GC_PRESSURE_HIGH) return true;
+
+  // Allocation rate heuristic with config
+  if (gc->allocs_since_collect > gc->config.expansion_trigger) {
+    if (utilization > 0.60f) return true;
+  }
 
   return false;
 }
 
 void *simple_gc_alloc(gc_t *gc, obj_type_t type, size_t size) {
   if (!gc || size == 0) return NULL;
+
+  // Track allocation time
+  clock_t now = clock();
+  if (gc->last_alloc_time > 0) {
+    clock_t time_since_last = now - gc->last_alloc_time;
+    // Update running average of allocation rate
+    // rate = allocations per second
+    if (time_since_last > 0) {
+      double seconds = (double)time_since_last / CLOCKS_PER_SEC;
+      gc->alloc_rate = 1.0 / seconds;  // Simple rate calculation
+    }
+  }
+  gc->last_alloc_time = now;
 
   // auto-collect if pressure indicates to do so
   gc_update_pressure(gc);
@@ -565,11 +261,16 @@ void *simple_gc_alloc(gc_t *gc, obj_type_t type, size_t size) {
   void *result = NULL;
 
   if (gc->use_pools) {
-    size_class_t *sc = gc_get_size_class(gc, size);
+    size_class_t *sc = gc_pool_get_size_class(gc->size_classes, size);
     if (sc) {
-      result = gc_alloc_from_size_class(gc, sc, type, size);
+      result = gc_pool_alloc_from_size_class(sc, type, size);
     } else {
-      result = gc_alloc_large(gc, type, size);
+      // USE NEW LARGE MODULE
+      if (size >= GC_HUGE_OBJECT_THRESHOLD) {
+        result = gc_huge_alloc(&gc->huge_objects, &gc->huge_object_count, type, size);
+      } else {
+        result = gc_large_alloc(&gc->large_blocks, &gc->large_block_count, type, size);
+      }
     }
   } else {  // fall back to malloc-based allocation
     // allocate total memory for object+header
@@ -592,45 +293,19 @@ void *simple_gc_alloc(gc_t *gc, obj_type_t type, size_t size) {
 
   // bookkeeping
   if (result) {
-    // memory pressure
+    // memory pressure tracking
     gc->allocs_since_collect++;
-    gc->total_allocations++;
 
-    // heap
+    // heap tracking
     gc->object_count++;
     gc->heap_used += total_size;
     update_heap_bounds(gc, result, size);
 
-    // stats
+    // statistics
+    gc->total_allocations++;
     gc->total_bytes_allocated += total_size;
   }
   return result;
-}
-
-static obj_header_t *gc_find_header_in_large_objects(gc_t *gc, void* ptr) {
-  if (!gc || !ptr) return NULL;
-
-  large_block_t *block = gc->large_blocks;
-  while (block) {
-    void *found = (void*) (block->header + 1);
-    if (found == ptr) return block->header;
-    block = block->next;
-  }
-
-  return NULL;
-}
-
-static obj_header_t *gc_find_header_in_huge_objects(gc_t *gc, void* ptr) {
-  if (!gc || !ptr) return NULL;
-
-  huge_object_t *huge = gc->huge_objects;
-  while (huge) {
-    void *found = (void*) (huge->header + 1);
-    if (found == ptr) return huge->header;
-    huge = huge->next;
-  }
-
-  return NULL;
 }
 
 obj_header_t* gc_find_header_in_pools(gc_t *gc, void *ptr) {
@@ -641,7 +316,7 @@ obj_header_t* gc_find_header_in_pools(gc_t *gc, void *ptr) {
     pool_block_t *block = sc->blocks;
 
     while (block) {
-      if (gc_pointer_in_block(block, ptr)) {
+      if (gc_pool_pointer_in_block(block, ptr)) {
         // ptr found in block, find header
         char *base = (char*) block->memory;
         char *mem_start = (char*) ptr;
@@ -673,10 +348,10 @@ obj_header_t *simple_gc_find_header(gc_t *gc, void *ptr) {
     obj_header_t* header = gc_find_header_in_pools(gc, ptr);
     if (header) return header;
 
-    header = gc_find_header_in_large_objects(gc, ptr);
+    header = gc_large_find_header(gc->large_blocks, ptr);
     if (header) return header;
 
-    header = gc_find_header_in_huge_objects(gc, ptr);
+    header = gc_huge_find_header(gc->huge_objects, ptr);
     if (header) return header;
   }
 
@@ -815,7 +490,7 @@ static void gc_sweep_pools(gc_t *gc) {
           // slot is used - check if marked
           if (!header->marked) {
             // unmarked, return to pool
-            gc_free_to_pool(gc, header);
+            gc_pool_free_to_block(block, sc, header);
             gc->object_count--;
             size_t bytes_changed = (sizeof(obj_header_t) + header->size);
             gc->heap_used -= bytes_changed;
@@ -947,11 +622,14 @@ void simple_gc_collect(gc_t *gc) {
     simple_gc_compact(gc);
   }
 
-  // reset memory pressure tracking
+  clock_t end = clock();
+  gc->last_collect_time = end;
+
+  // Calculate collection duration
+  gc->last_collection_duration = (double)(end - start) / CLOCKS_PER_SEC;
+
+  // Reset allocation counter
   gc->allocs_since_collect = 0;
-  gc->last_collect_time = clock();
-  clock_t elapsed = gc->last_collect_time - start;
-  if (elapsed > 0) gc->alloc_rate = (gc->total_allocations * CLOCKS_PER_SEC) / elapsed;
 
   simple_gc_auto_tune(gc);
 }
@@ -1090,40 +768,6 @@ bool simple_gc_auto_init_stack(gc_t *gc) {
   return true;
 }
 
-bool gc_pointer_in_block(pool_block_t *block, void *ptr) {
-  if (!block || !ptr) return false;
-
-  char *start = block->memory;
-  char *end = start + (block->slot_size * block->capacity);
-  char *p = (char*) ptr;
-  return (p >= start && p < end);
-}
-
-void gc_free_to_pool(gc_t *gc, obj_header_t *header) {
-  if (!gc || !header) return;
-
-  // check if the object is from a pool
-  size_t size = header->size;
-  size_class_t *sc = gc_get_size_class(gc, size);
-  if (!sc) return;
-
-  // find which block the object belongs to
-  void *ptr = (void*)(header + 1);
-  pool_block_t *block = sc->blocks;
-
-  while (block) {
-    if (gc_pointer_in_block(block, ptr)) {
-      free_node_t *node = (free_node_t*) header;
-      node->next = block->free_list;
-      block->free_list = node;
-      block->used--;
-      sc->total_used--;
-      return;
-    }
-    block = block->next;
-  }
-}
-
 static bool gc_add_relocation(compaction_ctx_t *ctx, void *old_addr, void *new_addr) {
   if (!ctx || !old_addr || !new_addr) return false;
 
@@ -1172,13 +816,14 @@ static void gc_clear_relocations(compaction_ctx_t *ctx) {
 static void gc_compact_size_class(gc_t *gc, size_class_t *sc) {
   if (!gc || !sc || sc->total_used == 0) return;
 
-  float util = (float) sc->total_used / (float) sc->total_capacity;
+  float util = gc_pool_utilization(sc);
   // good utilization, don't compact
   if (util > 0.7f) return;
 
   live_obj_t *live_objects = (live_obj_t*) malloc(sizeof(live_obj_t) * sc->total_used);
   if (!live_objects) return;
 
+  // collect live objects
   size_t live_count = 0;
   pool_block_t *block = sc->blocks;
   while (block) {
@@ -1210,23 +855,45 @@ static void gc_compact_size_class(gc_t *gc, size_class_t *sc) {
     block = block->next;
   }
 
-  // shift objects to beginning of the first block
+  // find new addresses and register relocations
   block = sc->blocks;
   char *dest = (char*) block->memory;
+
   for (size_t i = 0; i < live_count; ++i) {
-    obj_header_t *old_header = live_objects[i].header;
+    // obj_header_t *old_header = live_objects[i].header;
     void *old_data = live_objects[i].data;
 
-    obj_header_t *new_header = live_objects[i].header;
-    void *new_data = live_objects[i].data;
+    obj_header_t *new_header = (obj_header_t*) dest;
+    void *new_data = (void*)(new_header + 1);
 
-    if (old_header != new_header) {
-      memcpy(new_header, old_header, sizeof(obj_header_t) + old_header->size);
+    // register relocation before moving
+    if (old_data != new_data) {
       gc_add_relocation(&gc->compaction, old_data, new_data);
     }
 
     dest += block->slot_size;
+
     // move to next block if the current block is full
+    if (dest >= (char*) block->memory + (block->slot_size * block->capacity)) {
+      block = block->next;
+      if (!block) break;
+      dest = (char*) block->memory;
+    }
+  }
+
+  // shift objects in the block
+  block = sc->blocks;
+  dest = (char*) block->memory;
+
+  for (size_t i = 0; i < live_count; ++i) {
+    obj_header_t *old_header = live_objects[i].header;
+    obj_header_t *new_header = (obj_header_t*) dest;
+
+    if (old_header != new_header) {
+      memmove(new_header, old_header, sizeof(obj_header_t) + old_header->size);
+    }
+
+    dest += block->slot_size;
 
     if (dest >= (char*) block->memory + (block->slot_size * block->capacity)) {
       block = block->next;
@@ -1237,7 +904,7 @@ static void gc_compact_size_class(gc_t *gc, size_class_t *sc) {
 
   free(live_objects);
 
-  // rebuild free list for all blocks
+  // rebuild free lists
   block = sc->blocks;
   size_t objects_placed = 0;
 
@@ -1249,7 +916,6 @@ static void gc_compact_size_class(gc_t *gc, size_class_t *sc) {
 
     for (size_t i = 0; i < block->capacity; ++i) {
       if (objects_placed < live_count) { // slot is used
-
         ++block->used;
         ++objects_placed;
       } else { // slot is available, add to free list
@@ -1309,7 +975,7 @@ bool simple_gc_should_compact(gc_t *gc) {
     total_used += sc->total_used;
 
     if (sc->total_capacity > 0) {
-      float util = (float) sc->total_used / (float) sc->total_capacity;
+      float util = gc_pool_utilization(sc);
       if (util < 0.5f && sc->total_used > 0) {
         ++fragmented_classes;
       }
@@ -1319,7 +985,7 @@ bool simple_gc_should_compact(gc_t *gc) {
   // compact if overall utilization <50% and multiple classes fragmented
   if (total_capacity > 0) {
     float overall_util = (float) total_used / (float) total_capacity;
-    return (overall_util < 0.5 && fragmented_classes > 1);
+    return (overall_util < 0.5 && fragmented_classes >= 1);
   }
   return false;
 }
@@ -1331,7 +997,12 @@ void simple_gc_compact(gc_t *gc) {
   gc->compaction.relocations = NULL;
   gc->compaction.relocation_count = 0;
 
-  size_t bytes_before = gc->heap_used;
+  // Track fragmentation reduction instead of heap usage
+  size_t fragmented_before = 0;
+  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
+    size_class_t *sc = &gc->size_classes[i];
+    fragmented_before += gc_pool_fragmented_bytes(sc);
+  }
 
   // compact each size class
   for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
@@ -1343,9 +1014,16 @@ void simple_gc_compact(gc_t *gc) {
   gc->compaction.in_progress = false;
   gc->total_compactions++;
 
-  size_t bytes_after = gc->heap_used;
-  if (bytes_before > bytes_after) {
-    gc->bytes_reclaimed += (bytes_before - bytes_after);
+  // Calculate fragmentation after compaction
+  size_t fragmented_after = 0;
+  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
+    size_class_t *sc = &gc->size_classes[i];
+    fragmented_after += gc_pool_fragmented_bytes(sc);
+  }
+
+  // Track how much fragmentation was reduced
+  if (fragmented_before > fragmented_after) {
+    gc->bytes_reclaimed += (fragmented_before - fragmented_after);
   }
 }
 
@@ -1364,16 +1042,10 @@ gc_pressure_t simple_gc_check_pressure(gc_t *gc) {
 static bool gc_expand_pool(gc_t *gc, size_class_t *sc) {
   if (!gc || !sc) return false;
 
-  size_t current_capacity = 0;
-  pool_block_t *block = sc->blocks;
-  while (block) {
-    current_capacity += block->capacity;
-    block = block->next;
-  }
-
+  size_t current_capacity = sc->total_capacity;
   size_t new_capacity = current_capacity > 0 ? current_capacity : 64;
 
-  pool_block_t *new_block = gc_create_pool_block(sc->slot_size, new_capacity);
+  pool_block_t *new_block = gc_pool_create_block(sc->slot_size, new_capacity);
   if (!new_block) return false;
 
   // add new block to size class
@@ -1396,7 +1068,7 @@ static void gc_shrink_pool(gc_t *gc, size_class_t *sc) {
       // block is empty, remove it
       *curr = block->next;
       sc->total_capacity -= block->capacity;
-      gc_free_pool_block(block);
+      gc_pool_free_block(block);
     } else {
       curr = &block->next;
     }
@@ -1411,11 +1083,11 @@ void simple_gc_set_config(gc_t *gc, gc_config_t *config) {
 void simple_gc_auto_tune(gc_t *gc) {
   if (!gc || !gc->use_pools) return;
 
-  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
+  for (int i = 0; i < GC_NUM_SIZE_CLASSES; i++) {
     size_class_t *sc = &gc->size_classes[i];
     if (sc->total_capacity == 0) continue;
 
-    float utilization = (float) sc->total_used / (float) sc->total_capacity;
+    float utilization = gc_pool_utilization(sc);
     if (gc->config.auto_expand_pools && utilization > 0.9f) gc_expand_pool(gc, sc);
     if (gc->config.auto_shrink_pools && utilization < 0.2f) gc_shrink_pool(gc, sc);
   }
@@ -1434,16 +1106,25 @@ void simple_gc_get_stats(gc_t *gc, gc_stats_t *stats) {
   stats->huge_object_count = gc->huge_object_count;
 
   stats->pool_blocks_allocated = 0;
+  size_t total_capacity = 0;
+  size_t total_fragmented = 0;
+
   for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
     size_class_t *sc = &gc->size_classes[i];
     stats->size_class_stats[i] = sc->total_allocated;
+    stats->pool_blocks_allocated += gc_pool_count_blocks(sc);
 
-    pool_block_t *block = sc->blocks;
-    while (block) {
-      stats->pool_blocks_allocated++;
-      block = block->next;
-    }
+    // Calculate fragmentation
+    size_t capacity_bytes = sc->total_capacity * sc->slot_size;
+    size_t used_bytes = sc->total_used * sc->slot_size;
+    total_capacity += capacity_bytes;
+    total_fragmented += (capacity_bytes - used_bytes);
   }
+
+  stats->total_fragmented_bytes = total_fragmented;
+  stats->fragmentation_ratio = total_capacity > 0
+    ? (float)total_fragmented / (float)total_capacity
+    : 0.0f;
 }
 
 void simple_gc_print_stats(gc_t *gc) {
@@ -1461,6 +1142,9 @@ void simple_gc_print_stats(gc_t *gc) {
   printf("Large blocks:     %zu\n", stats.large_block_count);
   printf("Huge objects:     %zu\n", stats.huge_object_count);
   printf("Pool blocks:      %zu\n", stats.pool_blocks_allocated);
+  printf("Fragmented:       %zu bytes (%.1f%%)\n",
+         stats.total_fragmented_bytes,
+         stats.fragmentation_ratio * 100.0f);
 
   printf("\nSize class allocations:\n");
   for (int i = 0; i < GC_NUM_SIZE_CLASSES; i++) {

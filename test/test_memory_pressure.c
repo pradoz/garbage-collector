@@ -1,5 +1,6 @@
 #include "munit.h"
 #include "simple_gc.h"
+#include "gc_pool.h"
 
 
 static MunitResult test_check(const MunitParameter params[], void *data) {
@@ -36,13 +37,27 @@ static MunitResult test_auto_collection(const MunitParameter params[], void *dat
   gc_t gc;
   simple_gc_init(&gc, 1000);
 
-  // collect at 50% utilization
-  gc.config.collect_threshold = 0.5f;
-  size_t collections_before = gc.total_collections;
+  // should not collect when below threshold
+  gc.heap_used = 400;  // 40%
+  gc.config.collect_threshold = 0.75f;
+  gc.allocs_since_collect = 10;
 
-  for (int i = 0; i < 20; ++i) {
-    simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, 50);
-  }
+  // manually call the internal function by triggering allocation
+  size_t collections_before = gc.total_collections;
+  simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, 10);
+  munit_assert_size(gc.total_collections, ==, collections_before);
+
+  // should collect when above threshold
+  gc.heap_used = 800;
+  collections_before = gc.total_collections;
+  simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, 10);
+  munit_assert_size(gc.total_collections, >, collections_before);
+
+  // should collect on high pressure regardless of threshold
+  gc.heap_used = 900;
+  gc.config.collect_threshold = 0.99f;
+  collections_before = gc.total_collections;
+  simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, 10);
   munit_assert_size(gc.total_collections, >, collections_before);
 
   // free
@@ -61,7 +76,7 @@ static MunitResult test_auto_expansion(const MunitParameter params[], void *data
   gc_config_t config = gc.config;
   simple_gc_set_config(&gc, &config);
 
-  size_class_t *sc = gc_get_size_class(&gc, 16);
+  size_class_t *sc = gc_pool_get_size_class(gc.size_classes, 16);
   size_t initial_capacity = sc->total_capacity;
 
   // fill memory pools
@@ -93,7 +108,7 @@ static MunitResult test_auto_shrinking(const MunitParameter params[], void *data
     simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, 16);
   }
 
-  size_class_t *sc = gc_get_size_class(&gc, 16);
+  size_class_t *sc = gc_pool_get_size_class(gc.size_classes, 16);
   size_t capacity_before = sc->total_capacity;
 
   // run garbage collection, no roots -> all freed

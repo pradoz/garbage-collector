@@ -5,43 +5,30 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <time.h>
+#include "gc_pool.h"
+#include "gc_large.h"
+#include "gc_types.h"
+
 
 // versioning
 #define SIMPLE_GC_VERSION_MAJOR 0
 #define SIMPLE_GC_VERSION_MINOR 2
-#define SIMPLE_GC_VERSION_PATCH 0
-
-// memory pools
-#define GC_NUM_SIZE_CLASSES 6
-#define GC_POOL_BLOCK_SIZE 4096  // 4KB blocks
-#define GC_LARGE_OBJECT_THRESHOLD 256
-#define GC_HUGE_OBJECT_THRESHOLD 4096
-#define GC_SIZE_MAX 1024 * 1024 * 5  // 5 MB
+#define SIMPLE_GC_VERSION_PATCH 2
 
 
-extern const size_t GC_SIZE_CLASS_SIZES[GC_NUM_SIZE_CLASSES];
+// wrappers for backward compatibility
+bool simple_gc_init_header(obj_header_t *header, obj_type_t type, size_t size);
+bool simple_gc_is_valid_header(const obj_header_t *header);
 
 
-typedef struct obj_header obj_header_t;
 typedef struct gc_context gc_t;
 typedef struct gc_config gc_config_t;
 typedef struct reference_node ref_node_t;
-
-typedef struct size_class size_class_t;
-typedef struct large_block large_block_t;
-typedef struct huge_object huge_object_t;
 
 typedef struct relocation_entry relocation_entry_t;
 typedef struct compaction_ctx compaction_ctx_t;
 typedef struct live_obj live_obj_t;
 
-
-typedef enum {
-  OBJ_TYPE_UNKNOWN = 0,
-  OBJ_TYPE_PRIMITIVE,
-  OBJ_TYPE_ARRAY,
-  OBJ_TYPE_STRUCT,
-} obj_type_t;
 
 typedef enum {
   GC_PRESSURE_NONE = 0,
@@ -50,35 +37,6 @@ typedef enum {
   GC_PRESSURE_HIGH = 3,
   GC_PRESSURE_CRITICAL = 4,
 } gc_pressure_t;
-
-typedef struct obj_header {
-  obj_type_t type;
-  size_t size;
-  bool marked;
-  obj_header_t *next;
-} obj_header_t;
-
-typedef struct free_node {
-  struct free_node *next;
-} free_node_t;
-
-typedef struct pool_block {
-  void *memory;
-  size_t slot_size;
-  size_t capacity;
-  size_t used;
-  free_node_t *free_list;
-  struct pool_block *next;
-} pool_block_t;
-
-typedef struct size_class {
-  size_t size;
-  size_t slot_size;
-  pool_block_t *blocks;
-  size_t total_capacity;
-  size_t total_used;
-  size_t total_allocated;
-} size_class_t;
 
 typedef struct relocation_entry {
   void *old_addr;
@@ -139,6 +97,8 @@ typedef struct gc_context {
   size_t allocs_since_collect;
   size_t alloc_rate; // estimate
   clock_t last_collect_time;
+  clock_t last_alloc_time;
+  double last_collection_duration;
 
   // statistics
   size_t total_allocations;
@@ -148,22 +108,6 @@ typedef struct gc_context {
   size_t total_compactions;
   size_t bytes_reclaimed;
 } gc_t;
-
-typedef struct large_block {
-  void *memory;
-  size_t size;
-  bool in_use;
-  obj_header_t *header;
-  large_block_t *next;
-} large_block_t;
-
-// >GC_HUGE_OBJECT_THRESHOLD, uses mmap
-typedef struct huge_object {
-  void *memory;
-  size_t size;
-  obj_header_t *header;
-  huge_object_t *next;
-} huge_object_t;
 
 typedef struct reference_node {
   void *from_obj;
@@ -181,6 +125,8 @@ typedef struct gc_stats {
   size_t huge_object_count;
   size_t pool_blocks_allocated;
   size_t size_class_stats[GC_NUM_SIZE_CLASSES];
+  size_t total_fragmented_bytes;
+  float fragmentation_ratio;
 } gc_stats_t;
 
 
@@ -228,12 +174,7 @@ bool simple_gc_is_heap_pointer(gc_t *gc, void *ptr);
 void simple_gc_scan_stack(gc_t* gc);
 bool simple_gc_auto_init_stack(gc_t *gc);
 
-// memory pools
-int gc_size_to_class(size_t size);
-size_class_t* gc_get_size_class(gc_t *gc, size_t size);
-pool_block_t* gc_create_pool_block(size_t slot_size, size_t capacity);
-bool gc_pointer_in_block(pool_block_t *block, void *ptr);
-void gc_free_to_pool(gc_t *gc, obj_header_t *header);
+// compaction
 bool simple_gc_should_compact(gc_t *gc);
 void simple_gc_compact(gc_t *gc);
 

@@ -1,12 +1,12 @@
 #include "munit.h"
 #include "simple_gc.h"
+#include "gc_pool.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
 
 extern const size_t GC_SIZE_CLASS_SIZES[];
-extern void gc_free_pool_block(pool_block_t *block);
 
 
 static MunitResult test_size_class_selection(const MunitParameter params[], void *data) {
@@ -14,25 +14,25 @@ static MunitResult test_size_class_selection(const MunitParameter params[], void
   (void)data;
 
   // exact match
-  munit_assert_int(gc_size_to_class(8), ==, 0);
-  munit_assert_int(gc_size_to_class(16), ==, 1);
-  munit_assert_int(gc_size_to_class(32), ==, 2);
-  munit_assert_int(gc_size_to_class(64), ==, 3);
-  munit_assert_int(gc_size_to_class(128), ==, 4);
-  munit_assert_int(gc_size_to_class(256), ==, 5);
+  munit_assert_int(gc_pool_size_to_class(8), ==, 0);
+  munit_assert_int(gc_pool_size_to_class(16), ==, 1);
+  munit_assert_int(gc_pool_size_to_class(32), ==, 2);
+  munit_assert_int(gc_pool_size_to_class(64), ==, 3);
+  munit_assert_int(gc_pool_size_to_class(128), ==, 4);
+  munit_assert_int(gc_pool_size_to_class(256), ==, 5);
 
   // rounding up
-  munit_assert_int(gc_size_to_class(7), ==, 0);
-  munit_assert_int(gc_size_to_class(11), ==, 1);
-  munit_assert_int(gc_size_to_class(22), ==, 2);
-  munit_assert_int(gc_size_to_class(63), ==, 3);
-  munit_assert_int(gc_size_to_class(127), ==, 4);
-  munit_assert_int(gc_size_to_class(129), ==, 5);
+  munit_assert_int(gc_pool_size_to_class(7), ==, 0);
+  munit_assert_int(gc_pool_size_to_class(11), ==, 1);
+  munit_assert_int(gc_pool_size_to_class(22), ==, 2);
+  munit_assert_int(gc_pool_size_to_class(63), ==, 3);
+  munit_assert_int(gc_pool_size_to_class(127), ==, 4);
+  munit_assert_int(gc_pool_size_to_class(129), ==, 5);
 
   // boundary
-  munit_assert_int(gc_size_to_class(256), ==, 5);
-  munit_assert_int(gc_size_to_class(257), ==, -1); // too large
-  munit_assert_int(gc_size_to_class(0), ==, 0);
+  munit_assert_int(gc_pool_size_to_class(256), ==, 5);
+  munit_assert_int(gc_pool_size_to_class(257), ==, -1); // too large
+  munit_assert_int(gc_pool_size_to_class(0), ==, 0);
 
   return MUNIT_OK;
 }
@@ -78,7 +78,7 @@ static MunitResult test_pool_block_creation(const MunitParameter params[], void 
   size_t slot_size = sizeof(obj_header_t) + 16;
   size_t capacity = 10;
 
-  pool_block_t *block = gc_create_pool_block(slot_size, capacity);
+  pool_block_t *block = gc_pool_create_block(slot_size, capacity);
 
   munit_assert_not_null(block);
   munit_assert_not_null(block->memory);
@@ -96,7 +96,7 @@ static MunitResult test_pool_block_creation(const MunitParameter params[], void 
   munit_assert_size(count, ==, capacity);
 
   // free
-  gc_free_pool_block(block);
+  gc_pool_free_block(block);
   return MUNIT_OK;
 }
 
@@ -201,7 +201,7 @@ static MunitResult test_pool_expansion(const MunitParameter params[], void *data
   munit_assert_size(simple_gc_object_count(&gc), ==, NUM_OBJS);
 
   // check that pool expanded and has multiple blocks
-  size_class_t *sc = gc_get_size_class(&gc, sizeof(int));
+  size_class_t *sc = gc_pool_get_size_class(gc.size_classes, sizeof(int));
   munit_assert_not_null(sc);
 
   int block_count = 0;
@@ -298,7 +298,7 @@ static MunitResult test_pool_reuse(const MunitParameter params[], void *data) {
   }
 
   // check for reused memory
-  size_class_t *sc = gc_get_size_class(&gc, sizeof(int));
+  size_class_t *sc = gc_pool_get_size_class(gc.size_classes, sizeof(int));
   munit_assert_not_null(sc);
   munit_assert_size(sc->total_allocated, ==, CYCLE_COUNT);
 

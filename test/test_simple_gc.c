@@ -78,21 +78,39 @@ static MunitResult test_gc_init(const MunitParameter params[], void *data) {
 
   gc_t gc;
 
-  bool result = simple_gc_init(&gc, 1024);
-  munit_assert_true(result);
-  munit_assert_size(simple_gc_object_count(&gc), ==, 0);
-  munit_assert_size(simple_gc_heap_capacity(&gc), ==, 1024);
-
-  // clean up
-  simple_gc_destroy(&gc);
-
   // null GC
-  result = simple_gc_init(NULL, 1024);
+  bool result = simple_gc_init(NULL, 1024);
   munit_assert_false(result);
 
   // no capacity
   result = simple_gc_init(&gc, 0);
   munit_assert_false(result);
+
+  result = simple_gc_init(&gc, 1024);
+  munit_assert_true(result);
+
+  // initialization
+  munit_assert_size(gc.object_count, ==, 0);
+  munit_assert_size(gc.heap_used, ==, 0);
+  munit_assert_size(gc.heap_capacity, ==, 1024);
+  munit_assert_size(gc.root_count, ==, 0);
+  munit_assert_size(gc.root_capacity, ==, 16);
+  munit_assert_not_null(gc.roots);
+  munit_assert_null(gc.references);
+  munit_assert_null(gc.stack_bottom);
+  munit_assert_false(gc.auto_root_scan_enabled);
+
+  munit_assert_int(gc.pressure, ==, GC_PRESSURE_NONE);
+  munit_assert_size(gc.allocs_since_collect, ==, 0);
+
+  // config defaults
+  munit_assert_true(gc.config.auto_collect);
+  munit_assert_double(gc.config.collect_threshold, ==, 0.75);
+  munit_assert_true(gc.config.auto_expand_pools);
+  munit_assert_true(gc.config.auto_shrink_pools);
+
+  // free
+  simple_gc_destroy(&gc);
 
   return MUNIT_OK;
 }
