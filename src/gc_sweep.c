@@ -1,9 +1,11 @@
+#include <sys/mman.h>
+#include <stdlib.h>
+
 #include "gc_sweep.h"
 #include "simple_gc.h"
 #include "gc_pool.h"
 #include "gc_large.h"
-#include <sys/mman.h>
-#include <stdlib.h>
+#include "gc_debug.h"
 
 
 void gc_sweep_pools(gc_t *gc) {
@@ -35,6 +37,10 @@ void gc_sweep_pools(gc_t *gc) {
           // slot is used - check if marked
           if (!header->marked) {
             // unmarked, return to pool
+            if (gc->debug) { // track free if in debug mode
+              void *data_ptr = (void*)(header + 1);
+              gc_debug_track_free(gc, data_ptr);
+            }
             gc_pool_free_to_block(block, sc, header);
             gc->object_count--;
             size_t bytes_changed = (sizeof(obj_header_t) + header->size);
@@ -122,6 +128,22 @@ void gc_sweep_legacy(gc_t *gc) {
   while (*curr) {
     if (!(*curr)->marked) { // unreachable
       obj_header_t* tmp = *curr;
+
+      if (gc->debug) {
+        void *data_ptr = (void*)(tmp + 1);
+        gc_debug_track_free(gc, data_ptr);
+      }
+
+      if (gc->trace) {
+        void *data_ptr = (void*)(tmp + 1);
+        size_t size = tmp->size;
+        gc_trace_event_t event = {
+          .type = GC_EVENT_FREE,
+          .data.free = {data_ptr, size}
+        };
+        gc_trace_event(gc, &event);
+      }
+
       *curr = (*curr)->next;
 
       gc->object_count--;

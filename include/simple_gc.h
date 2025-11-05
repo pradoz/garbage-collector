@@ -5,22 +5,20 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <time.h>
+
 #include "gc_types.h"
 #include "gc_pool.h"
 #include "gc_large.h"
 #include "gc_mark.h"
 #include "gc_sweep.h"
+#include "gc_trace.h"
+#include "gc_debug.h"
 
 
 // versioning
 #define SIMPLE_GC_VERSION_MAJOR 0
 #define SIMPLE_GC_VERSION_MINOR 2
 #define SIMPLE_GC_VERSION_PATCH 3
-
-
-// wrappers for backward compatibility
-bool simple_gc_init_header(obj_header_t *header, obj_type_t type, size_t size);
-bool simple_gc_is_valid_header(const obj_header_t *header);
 
 
 typedef struct gc_context gc_t;
@@ -30,6 +28,12 @@ typedef struct reference_node ref_node_t;
 typedef struct relocation_entry relocation_entry_t;
 typedef struct compaction_ctx compaction_ctx_t;
 typedef struct live_obj live_obj_t;
+
+
+// wrappers for backward compatibility
+bool simple_gc_init_header(obj_header_t *header, obj_type_t type, size_t size);
+bool simple_gc_is_valid_header(const obj_header_t *header);
+
 
 
 typedef enum {
@@ -109,6 +113,10 @@ typedef struct gc_context {
   size_t total_bytes_freed;
   size_t total_compactions;
   size_t bytes_reclaimed;
+
+  // trace/debug
+  gc_trace_t *trace;
+  gc_debug_t *debug;
 } gc_t;
 
 typedef struct reference_node {
@@ -151,6 +159,8 @@ size_t simple_gc_heap_used(const gc_t *gc);
 
 // memory allocation/object management
 void *simple_gc_alloc(gc_t *gc, obj_type_t type, size_t size);
+void *simple_gc_alloc_debug(gc_t *gc, obj_type_t type, size_t size,
+                            const char *file, int line, const char *func);
 obj_header_t *simple_gc_find_header(gc_t *gc, void *ptr);
 bool simple_gc_add_root(gc_t *gc, void *ptr);
 bool simple_gc_remove_root(gc_t *gc, void *ptr);

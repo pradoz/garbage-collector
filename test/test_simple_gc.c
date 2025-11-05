@@ -267,7 +267,7 @@ static MunitResult test_gc_alloc_stress(const MunitParameter params[], void* dat
     (void)data;
 
     gc_t gc;
-    size_t capacity = 1024 * 1024; // 1MB
+    size_t capacity = 5 * 1024 * 1024; // 5 MiB
     simple_gc_init(&gc, capacity);
 
     // allocate objects until nearly full
@@ -837,28 +837,28 @@ static MunitResult test_gc_cyclic_references(const MunitParameter params[], void
 }
 
 static MunitTest tests[] = {
-    {"/gc/init_header", test_init_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/is_valid_header", test_is_valid_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/new", test_gc_new, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/init", test_gc_init, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/object_count", test_gc_object_count, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/heap_capacity", test_gc_heap_capacity, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/heap_used", test_gc_heap_used, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/alloc", test_gc_alloc, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/alloc_boundary", test_gc_alloc_boundary, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/alloc_stress", test_gc_alloc_stress, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/find_header", test_gc_find_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/is_root", test_gc_is_root, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/root_management", test_gc_root_management, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/mark", test_gc_mark, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/mark_roots", test_gc_mark_roots, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/sweep", test_gc_sweep, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/collect", test_gc_collect, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/add_reference", test_gc_add_reference, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/array_references", test_gc_array_references, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/struct_references", test_gc_struct_references, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/complex_reference_graph", test_gc_complex_reference_graph, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/gc/cyclic_references", test_gc_cyclic_references, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/init_header", test_init_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/is_valid_header", test_is_valid_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/new", test_gc_new, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/init", test_gc_init, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/object_count", test_gc_object_count, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/heap_capacity", test_gc_heap_capacity, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/heap_used", test_gc_heap_used, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/alloc", test_gc_alloc, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/alloc_boundary", test_gc_alloc_boundary, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/alloc_stress", test_gc_alloc_stress, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/find_header", test_gc_find_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/is_root", test_gc_is_root, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/root_management", test_gc_root_management, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/mark", test_gc_mark, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/mark_roots", test_gc_mark_roots, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/sweep", test_gc_sweep, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/collect", test_gc_collect, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/add_reference", test_gc_add_reference, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/array_references", test_gc_array_references, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/struct_references", test_gc_struct_references, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/complex_reference_graph", test_gc_complex_reference_graph, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/cyclic_references", test_gc_cyclic_references, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
     {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}};
 
 static const MunitSuite suite = {"/simple_gc", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};

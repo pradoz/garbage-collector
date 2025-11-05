@@ -5,64 +5,71 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
+add_compile_definitions(_POSIX_C_SOURCE=199309L)
+
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 endif()
 
 find_package(Threads REQUIRED)
 
-# types library
-add_library(gc_types
-  src/gc_types.c
-)
-target_include_directories(gc_types PUBLIC include)
+# create an INTERFACE library for common includes
+add_library(gc_common INTERFACE)
+target_include_directories(gc_common INTERFACE include)
 
-# pool library
-add_library(gc_pool
-  src/gc_pool.c
-)
-target_include_directories(gc_pool PUBLIC include)
-target_link_libraries(gc_pool PUBLIC gc_types)
+# core types library (no dependencies)
+add_library(gc_types OBJECT src/gc_types.c)
+target_link_libraries(gc_types PUBLIC gc_common)
 
-# large blocks/objects library
-add_library(gc_large
-  src/gc_large.c
-)
-target_include_directories(gc_large PUBLIC include)
+# pool library (depends only on types)
+add_library(gc_pool OBJECT src/gc_pool.c)
+target_link_libraries(gc_pool PUBLIC gc_common)
+
+# large blocks library (depends only on types)
+add_library(gc_large OBJECT src/gc_large.c)
 target_compile_definitions(gc_large PRIVATE _GNU_SOURCE)
-target_link_libraries(gc_large PUBLIC gc_types)
+target_link_libraries(gc_large PUBLIC gc_common)
 
-# mark library
-add_library(gc_mark
-  src/gc_mark.c
-)
+# mark library (depends on types, pool, large)
+add_library(gc_mark OBJECT src/gc_mark.c)
+target_link_libraries(gc_mark PUBLIC gc_common)
 
-target_include_directories(gc_mark PUBLIC include)
-target_link_libraries(gc_mark PUBLIC gc_types gc_pool gc_large)
+# sweep library (depends on types, pool, large)
+add_library(gc_sweep OBJECT src/gc_sweep.c)
+target_link_libraries(gc_sweep PUBLIC gc_common)
 
-# sweep library
-add_library(gc_sweep
-  src/gc_sweep.c
-)
+# trace library (depends on types, pool)
+add_library(gc_trace OBJECT src/gc_trace.c)
+target_link_libraries(gc_trace PUBLIC gc_common)
 
-target_include_directories(gc_sweep PUBLIC include)
-target_link_libraries(gc_sweep PUBLIC gc_types gc_pool gc_large)
+# debug library (depends on types)
+add_library(gc_debug OBJECT src/gc_debug.c)
+target_compile_definitions(gc_debug PRIVATE _GNU_SOURCE)
+target_link_libraries(gc_debug PUBLIC gc_common)
 
-# simple_gc depends on all modules
+# platform library
+add_library(gc_platform OBJECT src/gc_platform.c)
+target_compile_definitions(gc_platform PRIVATE _GNU_SOURCE)
+target_link_libraries(gc_platform PUBLIC gc_common)
+
+# visualizer library
+add_library(gc_visualizer OBJECT src/gc_visualizer.c)
+target_link_libraries(gc_visualizer PUBLIC gc_common)
+
+# main GC library - combines all object libraries
 add_library(simple_gc
   src/simple_gc.c
-  src/gc_platform.c
-  src/gc_visualizer.c
+  $<TARGET_OBJECTS:gc_types>
+  $<TARGET_OBJECTS:gc_pool>
+  $<TARGET_OBJECTS:gc_large>
+  $<TARGET_OBJECTS:gc_mark>
+  $<TARGET_OBJECTS:gc_sweep>
+  $<TARGET_OBJECTS:gc_trace>
+  $<TARGET_OBJECTS:gc_debug>
+  $<TARGET_OBJECTS:gc_platform>
+  $<TARGET_OBJECTS:gc_visualizer>
 )
-target_include_directories(simple_gc PUBLIC include)
-target_link_libraries(simple_gc PUBLIC
-  gc_types
-  gc_pool
-  gc_large
-  gc_mark
-  gc_sweep
-    Threads::Threads
-)
+target_link_libraries(simple_gc PUBLIC gc_common Threads::Threads)
 target_compile_definitions(simple_gc PRIVATE _GNU_SOURCE)
 
 enable_testing()

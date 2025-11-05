@@ -265,20 +265,20 @@ static MunitResult test_huge_statistics(const MunitParameter params[], void *dat
 }
 
 static MunitTest tests[] = {
-  {"/large/create_block", test_large_create_block, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/large/best_fit", test_large_best_fit, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/large/alloc", test_large_alloc, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/large/reuse", test_large_reuse, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/large/find_header", test_large_find_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/huge/create_object", test_huge_create_object, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/huge/alloc", test_huge_alloc, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/huge/find_header", test_huge_find_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/large/statistics", test_large_statistics, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/huge/statistics", test_huge_statistics, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/create_block", test_large_create_block, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/best_fit", test_large_best_fit, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/alloc", test_large_alloc, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/reuse", test_large_reuse, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/find_header", test_large_find_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/create_object", test_huge_create_object, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/alloc", test_huge_alloc, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/find_header", test_huge_find_header, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/statistics", test_large_statistics, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/statistics", test_huge_statistics, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}
 };
 
-static const MunitSuite suite = {"/gc_large", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};
+static const MunitSuite suite = {"/large", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};
 
 int main(int argc, char *argv[]) {
   return munit_suite_main(&suite, NULL, argc, argv);

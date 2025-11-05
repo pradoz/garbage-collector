@@ -109,3 +109,27 @@ target_include_directories(test_gc_sweep PRIVATE
   munit
 )
 add_test(NAME test_gc_sweep COMMAND test_gc_sweep)
+
+# gc_trace tests
+add_executable(test_gc_trace
+  test_trace.c
+  munit/munit.c
+)
+target_link_libraries(test_gc_trace simple_gc gc_sweep gc_mark gc_types)
+target_include_directories(test_gc_trace PRIVATE
+  ${CMAKE_SOURCE_DIR}/include
+  munit
+)
+add_test(NAME test_gc_trace COMMAND test_gc_trace)
+
+# gc_debug tests
+add_executable(test_gc_debug
+  test_debug.c
+  munit/munit.c
+)
+target_link_libraries(test_gc_debug simple_gc gc_sweep gc_mark gc_types)
+target_include_directories(test_gc_debug PRIVATE
+  ${CMAKE_SOURCE_DIR}/include
+  munit
+)
+add_test(NAME test_gc_debug COMMAND test_gc_debug)

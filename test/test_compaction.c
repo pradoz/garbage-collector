@@ -220,14 +220,14 @@ static MunitResult test_stats(const MunitParameter params[], void *data) {
 }
 
 static MunitTest tests[] = {
-  {"/compaction/basic", test_basic, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/compaction/with_roots", test_with_roots, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/compaction/references", test_references, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/compaction/stats", test_stats, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/basic", test_basic, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/with_roots", test_with_roots, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/references", test_references, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/stats", test_stats, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}
 };
 
-static const MunitSuite suite = {"/simple_gc", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};
+static const MunitSuite suite = {"/compaction", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};
 
 int main(int argc, char *argv[]) {
   return munit_suite_main(&suite, NULL, argc, argv);

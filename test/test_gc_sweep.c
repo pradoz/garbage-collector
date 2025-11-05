@@ -189,16 +189,16 @@ static MunitResult test_sweep_legacy_mode(const MunitParameter params[], void *d
 }
 
 static MunitTest tests[] = {
-  {"/sweep/unmarked", test_sweep_unmarked, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/sweep/pools", test_sweep_pools, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/sweep/large", test_sweep_large, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/sweep/huge", test_sweep_huge, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/sweep/mixed", test_sweep_mixed, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/sweep/legacy_mode", test_sweep_legacy_mode, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/unmarked", test_sweep_unmarked, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/pools", test_sweep_pools, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/large", test_sweep_large, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/huge", test_sweep_huge, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/mixed", test_sweep_mixed, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/legacy_mode", test_sweep_legacy_mode, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}
 };
 
-static const MunitSuite suite = {"/gc_sweep", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};
+static const MunitSuite suite = {"/sweep", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};
 
 int main(int argc, char *argv[]) {
   return munit_suite_main(&suite, NULL, argc, argv);

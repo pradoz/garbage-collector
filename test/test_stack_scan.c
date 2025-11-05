@@ -332,21 +332,21 @@ static MunitResult test_stack_scan_performance(const MunitParameter params[], vo
 // }
 
 static MunitTest tests[] = {
-    {"/stack_scan/set_stack_bottom", test_gc_set_stack_bottom, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/stack_scan/get_stack_bottom", test_gc_get_stack_bottom, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/stack_scan/auto_roots_toggle", test_gc_auto_roots_toggle, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/stack_scan/heap_pointer_detection", test_heap_pointer_detection, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/stack_scan/basic", test_stack_scan_basic, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/stack_scan/no_false_negatives", test_stack_scan_no_false_negatives, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/stack_scan/platform_detection", test_stack_platform_detection, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/stack_scan/auto_init", test_auto_init_stack, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/stack_scan/auto_collect", test_fully_automatic_collection, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/stack_scan/register_scanning", test_register_scanning, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-    {"/stack_scan/perf", test_stack_scan_performance, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/set_stack_bottom", test_gc_set_stack_bottom, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/get_stack_bottom", test_gc_get_stack_bottom, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/auto_roots_toggle", test_gc_auto_roots_toggle, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/heap_pointer_detection", test_heap_pointer_detection, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/basic", test_stack_scan_basic, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/no_false_negatives", test_stack_scan_no_false_negatives, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/platform_detection", test_stack_platform_detection, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/auto_init", test_auto_init_stack, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/auto_collect", test_fully_automatic_collection, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/register_scanning", test_register_scanning, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+    {"/perf", test_stack_scan_performance, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
 
     {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}};
 
-static const MunitSuite suite = {"/simple_gc", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};
+static const MunitSuite suite = {"/stack_scan", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};
 
 int main(int argc, char *argv[]) {
   return munit_suite_main(&suite, NULL, argc, argv);

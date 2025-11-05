@@ -11,6 +11,8 @@
 #include "gc_large.h"
 #include "gc_mark.h"
 #include "gc_sweep.h"
+#include "gc_trace.h"
+#include "gc_debug.h"
 
 
 static void update_heap_bounds(gc_t *gc, void *ptr, size_t size) {
@@ -149,6 +151,10 @@ bool simple_gc_init(gc_t* gc, size_t init_capacity) {
   gc->total_compactions = 0;
   gc->bytes_reclaimed = 0;
 
+  // tracing/debugging
+  gc->trace = NULL;
+  gc->debug = NULL;
+
   return true;
 }
 
@@ -156,6 +162,9 @@ void simple_gc_destroy(gc_t* gc) {
   if (!gc) {
     return;
   }
+
+  // end tracing if active
+  if (gc->trace) gc_trace_end(gc);
 
   // free memory pools
   if (gc->use_pools) {
@@ -239,11 +248,10 @@ static bool gc_should_auto_collect(gc_t *gc) {
 void *simple_gc_alloc(gc_t *gc, obj_type_t type, size_t size) {
   if (!gc || size == 0) return NULL;
 
-  // Track allocation time
   clock_t now = clock();
   if (gc->last_alloc_time > 0) {
     clock_t time_since_last = now - gc->last_alloc_time;
-    // Update running average of allocation rate
+    // update running average of allocation rate
     // rate = allocations per second
     if (time_since_last > 0) {
       double seconds = (double)time_since_last / CLOCKS_PER_SEC;
@@ -267,7 +275,6 @@ void *simple_gc_alloc(gc_t *gc, obj_type_t type, size_t size) {
     if (sc) {
       result = gc_pool_alloc_from_size_class(sc, type, size);
     } else {
-      // USE NEW LARGE MODULE
       if (size >= GC_HUGE_OBJECT_THRESHOLD) {
         result = gc_huge_alloc(&gc->huge_objects, &gc->huge_object_count, type, size);
       } else {
@@ -295,6 +302,7 @@ void *simple_gc_alloc(gc_t *gc, obj_type_t type, size_t size) {
 
   // bookkeeping
   if (result) {
+    GC_TRACE_ALLOC(gc, result, size, type, __FILE__, __LINE__);
     // memory pressure tracking
     gc->allocs_since_collect++;
 
@@ -307,6 +315,17 @@ void *simple_gc_alloc(gc_t *gc, obj_type_t type, size_t size) {
     gc->total_allocations++;
     gc->total_bytes_allocated += total_size;
   }
+  return result;
+}
+
+void *simple_gc_alloc_debug(gc_t *gc, obj_type_t type, size_t size,
+    const char *file, int line, const char *func) {
+  void *result = simple_gc_alloc(gc, type, size);
+
+  if (result && gc->debug) {
+    gc_debug_track_alloc(gc, result, size, type, file, line, func);
+  }
+
   return result;
 }
 
@@ -394,6 +413,11 @@ bool simple_gc_add_root(gc_t *gc, void *ptr) {
 
   gc->roots[gc->root_count++] = ptr;
 
+  if (gc->trace) {
+    gc_trace_event_t event = {.type = GC_EVENT_ROOT_ADD};
+    gc_trace_event(gc, &event);
+  }
+
   return true;
 }
 
@@ -411,6 +435,11 @@ bool simple_gc_remove_root(gc_t *gc, void *ptr) {
       }
       // update and return found
       gc->root_count--;
+
+      if (gc->trace) {
+        gc_trace_event_t event = {.type = GC_EVENT_ROOT_REMOVE};
+        gc_trace_event(gc, &event);
+      }
       return true;
     }
   }
@@ -438,7 +467,17 @@ void simple_gc_collect(gc_t *gc) {
   }
 
   clock_t start = clock();
+  size_t objects_before = gc->object_count;
+  size_t bytes_before = gc->heap_used;
+  GC_TRACE_COLLECT_START(gc, "full", objects_before, bytes_before);
+
   gc->total_collections++;
+
+  // trace mark phase
+  if (gc->trace) {
+    gc_trace_event_t event = {.type = GC_EVENT_MARK_START};
+    gc_trace_event(gc, &event);
+  }
 
   gc_mark_all_roots(gc);
 
@@ -447,23 +486,50 @@ void simple_gc_collect(gc_t *gc) {
     simple_gc_scan_stack(gc);
   }
 
+  if (gc->trace) {
+    gc_trace_event_t event = {.type = GC_EVENT_MARK_END};
+    gc_trace_event(gc, &event);
+  }
+
+  // sweep phase
+  if (gc->trace) {
+    gc_trace_event_t event = {.type = GC_EVENT_SWEEP_START};
+    gc_trace_event(gc, &event);
+  }
+
   gc_sweep_all(gc);
+
+  if (gc->trace) {
+    gc_trace_event_t event = {.type = GC_EVENT_SWEEP_END};
+    gc_trace_event(gc, &event);
+  }
 
   // auto-compact if fragmented
   if (simple_gc_should_compact(gc)) {
+    if (gc->trace) {
+      gc_trace_event_t event = {.type = GC_EVENT_COMPACT_START};
+      gc_trace_event(gc, &event);
+
+    }
     simple_gc_compact(gc);
+
+    if (gc->trace) {
+      gc_trace_event_t event = {.type = GC_EVENT_COMPACT_END};
+      gc_trace_event(gc, &event);
+    }
   }
 
-  clock_t end = clock();
-  gc->last_collect_time = end;
-
-  // Calculate collection duration
-  gc->last_collection_duration = (double)(end - start) / CLOCKS_PER_SEC;
-
-  // Reset allocation counter
-  gc->allocs_since_collect = 0;
-
   simple_gc_auto_tune(gc);
+
+  clock_t end = clock();
+
+  gc->allocs_since_collect = 0;
+  gc->last_collection_duration = (double) (end - start) / CLOCKS_PER_SEC;
+
+  double duration = (double) (end - start) / CLOCKS_PER_SEC * 1000.0;
+  size_t collected = objects_before - gc->object_count;
+
+  GC_TRACE_COLLECT_END(gc, gc->object_count, gc->heap_used, collected, 0, duration);
 }
 
 bool simple_gc_add_reference(gc_t *gc, void *from_ptr, void *to_ptr) {

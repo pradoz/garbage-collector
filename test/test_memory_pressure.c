@@ -123,13 +123,13 @@ static MunitResult test_auto_shrinking(const MunitParameter params[], void *data
 }
 
 static MunitTest tests[] = {
-  {"/pressure/check", test_check, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/pressure/auto_collection", test_auto_collection, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/pressure/auto_expansion", test_auto_expansion, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/pressure/auto_shrinking", test_auto_shrinking, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/check", test_check, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/auto_collection", test_auto_collection, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/auto_expansion", test_auto_expansion, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/auto_shrinking", test_auto_shrinking, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}};
 
-static const MunitSuite suite = {"/simple_gc", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};
+static const MunitSuite suite = {"/memory_pressure", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};
 
 int main(int argc, char *argv[]) {
   return munit_suite_main(&suite, NULL, argc, argv);

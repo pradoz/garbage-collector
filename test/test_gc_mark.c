@@ -265,19 +265,19 @@ static MunitResult test_mark_diamond_graph(const MunitParameter params[], void *
 }
 
 static MunitTest tests[] = {
-  {"/mark/single_object", test_mark_single_object, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/mark/roots", test_mark_roots, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/mark/reference_chain", test_mark_reference_chain, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/mark/cycle", test_mark_cycle, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/mark/iterative", test_mark_iterative, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/mark/unmark_all", test_unmark_all, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/mark/count_marked", test_count_marked, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/mark/deep_chain", test_deep_reference_chain, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
-  {"/mark/diamond_graph", test_mark_diamond_graph, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/single_object", test_mark_single_object, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/roots", test_mark_roots, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/reference_chain", test_mark_reference_chain, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/cycle", test_mark_cycle, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/iterative", test_mark_iterative, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/unmark_all", test_unmark_all, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/count_marked", test_count_marked, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/deep_chain", test_deep_reference_chain, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
+  {"/diamond_graph", test_mark_diamond_graph, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL},
   {NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL}
 };
 
-static const MunitSuite suite = {"/gc_mark", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};
+static const MunitSuite suite = {"/mark", tests, NULL, 1, MUNIT_SUITE_OPTION_NONE};
 
 int main(int argc, char *argv[]) {
   return munit_suite_main(&suite, NULL, argc, argv);
