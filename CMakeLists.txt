@@ -38,7 +38,15 @@ add_library(gc_mark
 )
 
 target_include_directories(gc_mark PUBLIC include)
-target_link_libraries(gc_mark PUBLIC gc_types)
+target_link_libraries(gc_mark PUBLIC gc_types gc_pool gc_large)
+
+# sweep library
+add_library(gc_sweep
+  src/gc_sweep.c
+)
+
+target_include_directories(gc_sweep PUBLIC include)
+target_link_libraries(gc_sweep PUBLIC gc_types gc_pool gc_large)
 
 # simple_gc depends on all modules
 add_library(simple_gc
@@ -48,10 +56,11 @@ add_library(simple_gc
 )
 target_include_directories(simple_gc PUBLIC include)
 target_link_libraries(simple_gc PUBLIC
-    gc_types
-    gc_pool
-    gc_large
-    gc_mark
+  gc_types
+  gc_pool
+  gc_large
+  gc_mark
+  gc_sweep
     Threads::Threads
 )
 target_compile_definitions(simple_gc PRIVATE _GNU_SOURCE)

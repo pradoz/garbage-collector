@@ -10,6 +10,7 @@
 #include "gc_pool.h"
 #include "gc_large.h"
 #include "gc_mark.h"
+#include "gc_sweep.h"
 
 
 static void update_heap_bounds(gc_t *gc, void *ptr, size_t size) {
@@ -430,144 +431,6 @@ bool simple_gc_is_root(gc_t *gc, void *ptr) {
   return false;
 }
 
-static void gc_sweep_pools(gc_t *gc) {
-  if (!gc) return;
-
-  // sweep size classes
-  for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
-    size_class_t *sc = &gc->size_classes[i];
-    pool_block_t *block = sc->blocks;
-
-    while (block) {
-      char *slot = (char*) block->memory;
-
-      for (size_t j = 0; j < block->capacity; ++j) {
-        obj_header_t *header = (obj_header_t*) slot;
-        // slot is in use if not in the free list
-        bool in_use = true;
-        free_node_t *free_node = block->free_list;
-
-        while (free_node) {
-          if ((void*) free_node == (void*) header) {
-            in_use = false;
-            break;
-          }
-          free_node = free_node->next;
-        }
-
-        if (in_use) {
-          // slot is used - check if marked
-          if (!header->marked) {
-            // unmarked, return to pool
-            gc_pool_free_to_block(block, sc, header);
-            gc->object_count--;
-            size_t bytes_changed = (sizeof(obj_header_t) + header->size);
-            gc->heap_used -= bytes_changed;
-            gc->total_bytes_freed += bytes_changed;
-          } else {
-            // marked, unmark for next cycle
-            header->marked = false;
-          }
-        }
-
-        slot += block->slot_size;
-      }
-
-      block = block->next;
-    }
-  }
-}
-
-static void gc_sweep_large_objects(gc_t *gc) {
-  if (!gc) return;
-
-  // large_block_t *prev = NULL;
-  large_block_t *block = gc->large_blocks;
-  while (block) {
-    if (block->in_use) {
-      obj_header_t *header = block->header;
-
-      if (!header->marked) {
-        // unmarked, mark as free so we can reuse it
-        block->in_use = false;
-        gc->object_count--;
-        gc->heap_used -= (sizeof(obj_header_t) + header->size);
-      } else {
-        // marked, unmark for next cycle
-        header->marked = false;
-      }
-
-      // prev = block;
-      block = block->next;
-    } else {
-      // block is not in use - could be freed if we want aggressive cleanup
-      // for now, keep it for reuse
-      // prev = block;
-      block = block->next;
-    }
-  }
-}
-
-static void gc_sweep_huge_objects(gc_t *gc) {
-  if (!gc) return;
-
-  huge_object_t *prev = NULL;
-  huge_object_t *object = gc->huge_objects;
-  while (object) {
-    obj_header_t *header = object->header;
-
-    if (!header->marked) {
-      // unmarked, free it
-      huge_object_t *to_free = object;
-      object = object->next;
-
-      if (!prev) {
-        gc->huge_objects = object;
-      } else {
-        prev->next = object;
-      }
-
-      gc->object_count--;
-      gc->huge_object_count--;
-      gc->heap_used -= to_free->size;
-      munmap(to_free->memory, to_free->size);
-      free(to_free);
-    } else {
-      // marked, unmark for next cycle
-      header->marked = false;
-      prev = object;
-      object = object->next;
-    }
-  }
-}
-
-void simple_gc_sweep(gc_t *gc) {
-  if (!gc) return;
-
-  if (gc->use_pools) {
-    gc_sweep_pools(gc);
-    gc_sweep_large_objects(gc);
-    gc_sweep_huge_objects(gc);
-    return;  // exit early
-  }
-
-  // legacy sweep for non-pool mode
-  obj_header_t** curr = &gc->objects;
-  while (*curr) {
-    if (!(*curr)->marked) { // unreachable
-      obj_header_t* tmp = *curr;
-      *curr = (*curr)->next;
-
-      gc->object_count--;
-      gc->heap_used -= (sizeof(obj_header_t) + tmp->size);
-
-      free(tmp);
-    } else {
-      (*curr)->marked = false;
-      curr = &(*curr)->next;
-    }
-  }
-}
 
 void simple_gc_collect(gc_t *gc) {
   if (!gc) {
@@ -584,7 +447,7 @@ void simple_gc_collect(gc_t *gc) {
     simple_gc_scan_stack(gc);
   }
 
-  simple_gc_sweep(gc);
+  gc_sweep_all(gc);
 
   // auto-compact if fragmented
   if (simple_gc_should_compact(gc)) {

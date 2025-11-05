@@ -9,12 +9,13 @@
 #include "gc_pool.h"
 #include "gc_large.h"
 #include "gc_mark.h"
+#include "gc_sweep.h"
 
 
 // versioning
 #define SIMPLE_GC_VERSION_MAJOR 0
 #define SIMPLE_GC_VERSION_MINOR 2
-#define SIMPLE_GC_VERSION_PATCH 2
+#define SIMPLE_GC_VERSION_PATCH 3
 
 
 // wrappers for backward compatibility
@@ -164,7 +165,9 @@ static inline void simple_gc_mark(gc_t *gc, void *ptr) {
 static inline void simple_gc_mark_roots(gc_t *gc) {
   gc_mark_all_roots(gc);
 }
-void simple_gc_sweep(gc_t *gc);
+static inline void simple_gc_sweep(gc_t *gc) {
+  gc_sweep_all(gc);
+}
 void simple_gc_collect(gc_t *gc);
 
 // ref counting

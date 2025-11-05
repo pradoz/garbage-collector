@@ -96,3 +96,16 @@ target_include_directories(test_gc_mark PRIVATE
   ${CMAKE_SOURCE_DIR}/include
   munit
 )
+add_test(NAME test_gc_mark COMMAND test_gc_mark)
+
+# gc_sweep tests
+add_executable(test_gc_sweep
+  test_gc_sweep.c
+  munit/munit.c
+)
+target_link_libraries(test_gc_sweep simple_gc gc_sweep gc_mark gc_types)
+target_include_directories(test_gc_sweep PRIVATE
+  ${CMAKE_SOURCE_DIR}/include
+  munit
+)
+add_test(NAME test_gc_sweep COMMAND test_gc_sweep)
