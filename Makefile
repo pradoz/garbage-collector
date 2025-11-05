@@ -32,3 +32,4 @@ example-stack-scan: build
 
 clean:
 	@rm -rf $(BUILD_DIR)
+	@rm -rf test/CMakeFiles test/cmake_install.cmake test/CTestTestfile.cmake test/Makefile
