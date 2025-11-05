@@ -55,7 +55,7 @@ add_executable(test_compaction
   test_compaction.c
   munit/munit.c
 )
-target_link_libraries(test_compaction simple_gc gc_pool gc_types)  # CHANGED: added gc_pool and gc_types
+target_link_libraries(test_compaction simple_gc gc_types)
 target_include_directories(test_compaction PRIVATE
   ${CMAKE_SOURCE_DIR}/include
   munit
@@ -74,14 +74,25 @@ target_include_directories(test_memory_pressure PRIVATE
 )
 add_test(NAME test_memory_pressure COMMAND test_memory_pressure)
 
-# large objects/blocks tests
+# gc_large tests
 add_executable(test_gc_large
   test_gc_large.c
   munit/munit.c
 )
-target_link_libraries(test_gc_large simple_gc gc_large gc_types)  # CHANGED: added gc_types
+target_link_libraries(test_gc_large simple_gc gc_large gc_types)
 target_include_directories(test_gc_large PRIVATE
   ${CMAKE_SOURCE_DIR}/include
   munit
 )
 add_test(NAME test_gc_large COMMAND test_gc_large)
+
+# gc_mark tests
+add_executable(test_gc_mark
+  test_gc_mark.c
+  munit/munit.c
+)
+target_link_libraries(test_gc_mark simple_gc gc_mark gc_types)
+target_include_directories(test_gc_mark PRIVATE
+  ${CMAKE_SOURCE_DIR}/include
+  munit
+)

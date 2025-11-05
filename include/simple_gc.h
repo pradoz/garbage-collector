@@ -5,9 +5,10 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <time.h>
+#include "gc_types.h"
 #include "gc_pool.h"
 #include "gc_large.h"
-#include "gc_types.h"
+#include "gc_mark.h"
 
 
 // versioning
@@ -157,8 +158,12 @@ bool simple_gc_remove_root(gc_t *gc, void *ptr);
 bool simple_gc_is_root(gc_t *gc, void *ptr);
 
 // mark and sweep
-void simple_gc_mark(gc_t *gc, void *ptr);
-void simple_gc_mark_roots(gc_t *gc);
+static inline void simple_gc_mark(gc_t *gc, void *ptr) {
+  gc_mark_object(gc, ptr);
+}
+static inline void simple_gc_mark_roots(gc_t *gc) {
+  gc_mark_all_roots(gc);
+}
 void simple_gc_sweep(gc_t *gc);
 void simple_gc_collect(gc_t *gc);
 

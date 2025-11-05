@@ -32,14 +32,28 @@ target_include_directories(gc_large PUBLIC include)
 target_compile_definitions(gc_large PRIVATE _GNU_SOURCE)
 target_link_libraries(gc_large PUBLIC gc_types)
 
-# simple_gc depends on gc_pool and gc_large
+# mark library
+add_library(gc_mark
+  src/gc_mark.c
+)
+
+target_include_directories(gc_mark PUBLIC include)
+target_link_libraries(gc_mark PUBLIC gc_types)
+
+# simple_gc depends on all modules
 add_library(simple_gc
   src/simple_gc.c
   src/gc_platform.c
   src/gc_visualizer.c
 )
 target_include_directories(simple_gc PUBLIC include)
-target_link_libraries(simple_gc PUBLIC gc_types gc_pool gc_large Threads::Threads)
+target_link_libraries(simple_gc PUBLIC
+    gc_types
+    gc_pool
+    gc_large
+    gc_mark
+    Threads::Threads
+)
 target_compile_definitions(simple_gc PRIVATE _GNU_SOURCE)
 
 enable_testing()

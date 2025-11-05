@@ -1,7 +1,3 @@
-#include "simple_gc.h"
-#include "gc_platform.h"
-#include "gc_pool.h"
-#include "gc_large.h"
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,6 +5,11 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <time.h>
+#include "simple_gc.h"
+#include "gc_platform.h"
+#include "gc_pool.h"
+#include "gc_large.h"
+#include "gc_mark.h"
 
 
 static void update_heap_bounds(gc_t *gc, void *ptr, size_t size) {
@@ -429,38 +430,6 @@ bool simple_gc_is_root(gc_t *gc, void *ptr) {
   return false;
 }
 
-void simple_gc_mark(gc_t *gc, void *ptr) {
-  if (!gc || !ptr) {
-    return;
-  }
-
-  obj_header_t* header = simple_gc_find_header(gc, ptr);
-  if (!header || header->marked) {
-    return;
-  }
-
-  // object is reachable
-  header->marked = true;
-
-  ref_node_t* ref = gc->references;
-  while (ref) {
-    if (ref->from_obj == ptr) {
-      simple_gc_mark(gc, ref->to_obj);
-    }
-    ref = ref->next;
-  }
-}
-
-void simple_gc_mark_roots(gc_t *gc) {
-  if (!gc) {
-    return;
-  }
-
-  for (size_t i = 0; i < gc->root_count; ++i) {
-    simple_gc_mark(gc, gc->roots[i]);
-  }
-}
-
 static void gc_sweep_pools(gc_t *gc) {
   if (!gc) return;
 
@@ -608,7 +577,7 @@ void simple_gc_collect(gc_t *gc) {
   clock_t start = clock();
   gc->total_collections++;
 
-  simple_gc_mark_roots(gc);
+  gc_mark_all_roots(gc);
 
   // automated root scanning
   if (gc->auto_root_scan_enabled) {
@@ -747,7 +716,7 @@ void simple_gc_scan_stack(gc_t* gc) {
     if (simple_gc_is_heap_pointer(gc, check)) {
       obj_header_t * header = simple_gc_find_header(gc, check);
       if (header && !header->marked) {
-        simple_gc_mark(gc, check);
+        gc_mark_object(gc, check);
       }
     }
     // for now, accept false positives (integers mistaken for pointers)
