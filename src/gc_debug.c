@@ -164,24 +164,30 @@ void gc_debug_free_leak_report(gc_leak_report_t *report) {
   free(report);
 }
 
+static alloc_info_t *gc_debug_find_alloc_unlocked(gc_debug_t *debug, void *ptr) {
+  if (!debug || !ptr) return NULL;
+
+  alloc_info_t *info = debug->allocations;
+  while (info) {
+    if (info->address == ptr) {
+      return info;
+    }
+    info = info->next;
+  }
+
+  return NULL;
+}
+
 alloc_info_t *gc_debug_find_alloc(gc_t *gc, void *ptr) {
   if (!gc || !gc->debug || !ptr) return NULL;
 
   gc_debug_t *debug = gc->debug;
 
   pthread_mutex_lock(&debug->lock);
-
-  alloc_info_t *info = debug->allocations;
-  while (info) {
-    if (info->address == ptr) {
-      pthread_mutex_unlock(&debug->lock);
-      return info;
-    }
-    info = info->next;
-  }
-
+  alloc_info_t *info = gc_debug_find_alloc_unlocked(debug, ptr);
   pthread_mutex_unlock(&debug->lock);
-  return NULL;
+
+  return info;
 }
 
 void gc_debug_print_leaks(gc_t *gc, FILE *out) {
@@ -281,7 +287,7 @@ bool gc_debug_check_pointer(gc_t *gc, void *ptr) {
   if (gc->debug) {
     pthread_mutex_lock(&gc->debug->lock);
 
-    alloc_info_t *info = gc_debug_find_alloc(gc, ptr);
+    alloc_info_t *info = gc_debug_find_alloc_unlocked(gc->debug, ptr);
     if (info && info->freed && gc->debug->check_use_after_free) {
       fprintf(stderr, "ERROR: Use after free detected at %p\n", ptr);
       fprintf(stderr, "  Originally allocated at %s:%d\n", info->file, info->line);
