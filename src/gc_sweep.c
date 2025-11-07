@@ -19,6 +19,11 @@ void gc_sweep_pools(gc_t *gc) {
     while (block) {
       char *slot = (char*) block->memory;
 
+      // collect unmarked objects first, then free them
+      // this avoids corrupting the free list during iteration
+      obj_header_t *to_free[block->capacity];
+      size_t free_count = 0;
+
       for (size_t j = 0; j < block->capacity; ++j) {
         obj_header_t *header = (obj_header_t*) slot;
         // slot is in use if not in the free list
@@ -36,16 +41,8 @@ void gc_sweep_pools(gc_t *gc) {
         if (in_use) {
           // slot is used - check if marked
           if (!header->marked) {
-            // unmarked, return to pool
-            if (gc->debug) { // track free if in debug mode
-              void *data_ptr = (void*)(header + 1);
-              gc_debug_track_free(gc, data_ptr);
-            }
-            gc_pool_free_to_block(block, sc, header);
-            gc->object_count--;
-            size_t bytes_changed = (sizeof(obj_header_t) + header->size);
-            gc->heap_used -= bytes_changed;
-            gc->total_bytes_freed += bytes_changed;
+            // unmarked, collect for freeing
+            to_free[free_count++] = header;
           } else {
             // marked, unmark for next cycle
             header->marked = false;
@@ -53,6 +50,22 @@ void gc_sweep_pools(gc_t *gc) {
         }
 
         slot += block->slot_size;
+      }
+
+      // free all the collected objects
+      for (size_t j = 0; j < free_count; ++j) {
+        obj_header_t *header = to_free[j];
+
+        if (gc->debug) {
+          void *data_ptr = (void*)(header + 1);
+          gc_debug_track_free(gc, data_ptr);
+        }
+
+        size_t bytes_changed = (sizeof(obj_header_t) + header->size);
+        gc_pool_free_to_block(block, sc, header);
+        gc->object_count--;
+        gc->heap_used -= bytes_changed;
+        gc->total_bytes_freed += bytes_changed;
       }
 
       block = block->next;

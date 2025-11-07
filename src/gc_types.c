@@ -10,6 +10,10 @@ bool gc_init_header(obj_header_t *header, obj_type_t type, size_t size) {
   header->size = size;
   header->marked = false;
   header->next = NULL;
+
+  header->age = 0;
+  header->generation = 0;
+
   return true;
 }
 

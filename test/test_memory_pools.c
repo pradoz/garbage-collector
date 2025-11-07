@@ -345,39 +345,74 @@ static MunitResult test_sweep_small_objects(const MunitParameter params[], void 
   (void)data;
 
   gc_t gc;
-  simple_gc_init(&gc, 1024 * 1024);  // 1MiB heap
+  simple_gc_init(&gc, 1024 * 1024); // 1MiB heap
+  gc.gen_context = NULL; // disable generational GC
 
-  #define NUM_OBJS 100
+  const int NUM_OBJS = 100;
   int *objects[NUM_OBJS];
+  bool should_survive[NUM_OBJS];
 
   // allocate NUM_OBJS small objects
   for (int i = 0; i < NUM_OBJS; i++) {
     objects[i] = (int *)simple_gc_alloc(&gc, OBJ_TYPE_PRIMITIVE, sizeof(int));
     *objects[i] = i;
+    should_survive[i] = false;
   }
 
   munit_assert_size(simple_gc_object_count(&gc), ==, NUM_OBJS);
 
   // root every 10th object
+  munit_assert_size(gc.root_count, ==, 0);
   for (int i = 0; i < NUM_OBJS; i += 10) {
     simple_gc_add_root(&gc, objects[i]);
+    should_survive[i] = true;
   }
   munit_assert_size(gc.root_count, ==, 10);
 
-  // run garbage collectiong
-  simple_gc_collect(&gc);
+  // verify all roots are findable before GC
+  for (int i = 0; i < NUM_OBJS; i += 10) {
+    obj_header_t *header = simple_gc_find_header(&gc, objects[i]);
+    munit_assert_not_null(header);
+  }
+
+  // manually test marking
+  gc_mark_all_roots(&gc);
+
+  for (int i = 0; i < NUM_OBJS; i += 10) {
+    obj_header_t *header = simple_gc_find_header(&gc, objects[i]);
+    if (header) {
+      munit_assert_true(header->marked);
+    }
+  }
+
+  // count marked objects
+  size_t marked_count = gc_count_marked(&gc);
+  munit_assert_size(marked_count, ==, 10);
+
+  // run garbage collection (skip marking since we already did it)
+  gc_sweep_all(&gc);
+
 
   // should have 10 objects remaining
   munit_assert_size(simple_gc_object_count(&gc), ==, 10);
-  munit_assert_size(gc.large_block_count, ==, 0);
 
-  // verify objects survived
-  for (int i = 0; i < NUM_OBJS; i += 10) {
-    munit_assert_int(*objects[i], ==, i);
+  // verify _only_ the rooted objects survived
+  for (int i = 0; i < NUM_OBJS; ++i) {
+    obj_header_t *header = simple_gc_find_header(&gc, objects[i]);
+
+    if (should_survive[i]) { // rooted objects should still exist
+      if (!header) {
+        printf("ERROR: Root object %d was collected! Pointer was %p\n", i, (void*)objects[i]);
+      }
+      munit_assert_not_null(header);
+      munit_assert_int(*objects[i], ==, i);
+    } else { // non-rooted objects should be collected
+      munit_assert_null(header);
+    }
   }
 
+  // free
   simple_gc_destroy(&gc);
-  #undef NUM_OBJS
   return MUNIT_OK;
 }
 

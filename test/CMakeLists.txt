@@ -110,6 +110,18 @@ target_include_directories(test_gc_sweep PRIVATE
 )
 add_test(NAME test_gc_sweep COMMAND test_gc_sweep)
 
+# gc_generational tests
+add_executable(test_gc_generational
+  test_generational.c
+  munit/munit.c
+)
+target_link_libraries(test_gc_generational simple_gc gc_sweep gc_mark gc_types)
+target_include_directories(test_gc_generational PRIVATE
+  ${CMAKE_SOURCE_DIR}/include
+  munit
+)
+add_test(NAME test_gc_generational COMMAND test_gc_generational)
+
 # gc_trace tests
 add_executable(test_gc_trace
   test_trace.c

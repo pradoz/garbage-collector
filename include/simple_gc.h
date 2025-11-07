@@ -11,6 +11,7 @@
 #include "gc_large.h"
 #include "gc_mark.h"
 #include "gc_sweep.h"
+#include "gc_generation.h"
 #include "gc_trace.h"
 #include "gc_debug.h"
 
@@ -117,6 +118,8 @@ typedef struct gc_context {
   // trace/debug
   gc_trace_t *trace;
   gc_debug_t *debug;
+
+  gc_gen_t *gen_context;
 } gc_t;
 
 typedef struct reference_node {
@@ -200,6 +203,14 @@ void simple_gc_compact(gc_t *gc);
 gc_pressure_t simple_gc_check_pressure(gc_t *gc);
 void simple_gc_set_config(gc_t *gc, gc_config_t *config);
 void simple_gc_auto_tune(gc_t *gc);
+
+// generational
+bool simple_gc_enable_generations(gc_t *gc, size_t young_size);
+void simple_gc_disable_generations(gc_t *gc);
+bool simple_gc_is_generational(gc_t *gc);
+void simple_gc_collect_minor(gc_t *gc);
+void simple_gc_collect_major(gc_t *gc);
+void simple_gc_print_gen_stats(gc_t *gc);
 
 // stats
 void simple_gc_get_stats(gc_t *gc, gc_stats_t *stats);

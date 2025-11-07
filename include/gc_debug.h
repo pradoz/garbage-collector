@@ -30,6 +30,9 @@ typedef struct alloc_info {
   bool freed;
   uint64_t free_time;
 
+  unsigned char generation;
+  unsigned char age;
+
   alloc_info_t *next;
 } alloc_info_t;
 

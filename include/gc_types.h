@@ -19,6 +19,10 @@ typedef struct obj_header {
   size_t size;
   bool marked;
   obj_header_t *next;
+
+  // generational
+  unsigned char age;
+  unsigned char generation;
 } obj_header_t;
 
 

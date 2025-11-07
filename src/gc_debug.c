@@ -78,6 +78,15 @@ void gc_debug_track_alloc(gc_t *gc, void *ptr, size_t size, obj_type_t type,
   info->freed = false;
   info->free_time = 0;
 
+  obj_header_t *header = simple_gc_find_header(gc, ptr);
+  if (header) {
+    info->generation = header->generation;
+    info->age = header->age;
+  } else {
+    info->generation = 0;
+    info->age = 0;
+  }
+
   pthread_mutex_lock(&debug->lock);
 
   info->alloc_id = debug->next_alloc_id++;
@@ -219,12 +228,15 @@ void gc_debug_print_alloc_info(alloc_info_t *info, FILE *out) {
   if (!info || !out) return;
 
   fprintf(out, "  Allocation #%llu at %p\n", (unsigned long long)info->alloc_id, info->address);
-  fprintf(out, "    Size:     %zu bytes\n", info->size);
-  fprintf(out, "    Type:     %d\n", info->type);
-  fprintf(out, "    Location: %s:%d in %s()\n", info->file, info->line, info->function);
-  fprintf(out, "    Time:     %llu us\n", (unsigned long long)info->alloc_time);
-  fprintf(out, "    Thread:   %u\n", info->thread_id);
-  fprintf(out, "    Status:   %s\n", info->freed ? "FREED" : "LIVE");
+  fprintf(out, "    Size:       %zu bytes\n", info->size);
+  fprintf(out, "    Type:       %d\n", info->type);
+  fprintf(out, "    Generation: %s (age %u)\n",
+      info->generation == 0 ? "young" : "old",
+      info->age);
+  fprintf(out, "    Location:   %s:%d in %s()\n", info->file, info->line, info->function);
+  fprintf(out, "    Time:       %llu us\n", (unsigned long long)info->alloc_time);
+  fprintf(out, "    Thread:     %u\n", info->thread_id);
+  fprintf(out, "    Status:     %s\n", info->freed ? "FREED" : "LIVE");
 
   if (info->freed) {
     uint64_t lifetime = info->free_time - info->alloc_time;

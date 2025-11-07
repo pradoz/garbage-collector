@@ -11,6 +11,7 @@
 #include "gc_large.h"
 #include "gc_mark.h"
 #include "gc_sweep.h"
+#include "gc_generation.h"
 #include "gc_trace.h"
 #include "gc_debug.h"
 
@@ -155,6 +156,9 @@ bool simple_gc_init(gc_t* gc, size_t init_capacity) {
   gc->trace = NULL;
   gc->debug = NULL;
 
+  // generational
+  gc->gen_context = NULL;
+
   return true;
 }
 
@@ -162,6 +166,8 @@ void simple_gc_destroy(gc_t* gc) {
   if (!gc) {
     return;
   }
+
+  if (gc->gen_context) gc_gen_destroy(gc);
 
   // end tracing if active
   if (gc->trace) gc_trace_end(gc);
@@ -247,6 +253,17 @@ static bool gc_should_auto_collect(gc_t *gc) {
 
 void *simple_gc_alloc(gc_t *gc, obj_type_t type, size_t size) {
   if (!gc || size == 0) return NULL;
+
+  if (gc->gen_context && gc_gen_enabled(gc)) {
+    void *result = gc_gen_alloc(gc, type, size);
+    if (result) {
+      /* check if minor collection needed */
+      if (gc_gen_should_collect_minor(gc)) {
+        gc_gen_collect_minor(gc);
+      }
+      return result;
+    }
+  }
 
   clock_t now = clock();
   if (gc->last_alloc_time > 0) {
@@ -347,8 +364,22 @@ obj_header_t* gc_find_header_in_pools(gc_t *gc, void *ptr) {
 
         obj_header_t *header = (obj_header_t*) slot_start;
         void *expected_data_ptr = (void*)(header + 1);
-        if (expected_data_ptr == ptr && simple_gc_is_valid_header(header)) {
-          return header;
+
+        if (expected_data_ptr == ptr) {
+          // check if this slot is actually in use (not in free list)
+          bool is_free = false;
+          free_node_t *free_node = block->free_list;
+          while (free_node) {
+            if ((void*)free_node == (void*)header) {
+              is_free = true;
+              break;
+            }
+            free_node = free_node->next;
+          }
+
+          if (!is_free && simple_gc_is_valid_header(header)) {
+            return header;
+          }
         }
 
         // ptr is in the block but not a valid data pointer
@@ -364,7 +395,62 @@ obj_header_t* gc_find_header_in_pools(gc_t *gc, void *ptr) {
 obj_header_t *simple_gc_find_header(gc_t *gc, void *ptr) {
   if (!gc || !ptr) return NULL;
 
-  // check pools first
+  // check young generation
+  if (gc->gen_context && gc_gen_enabled(gc)) {
+    gc_gen_t *gen = gc->gen_context;
+
+    // search young pools
+    for (int i = 0; i < GC_NUM_SIZE_CLASSES; ++i) {
+      size_class_t *sc = &gen->young_pools[i];
+      pool_block_t *block = sc->blocks;
+
+      while (block) {
+        if (gc_pool_pointer_in_block(block, ptr)) {
+          char *base = (char*) block->memory;
+          char *mem_start = (char*) ptr;
+          ptrdiff_t offset = mem_start - base;
+          size_t slot_index = offset / block->slot_size;
+          char *slot_start = base + (slot_index * block->slot_size);
+
+          obj_header_t *header = (obj_header_t*) slot_start;
+          void *expected_data_ptr = (void*)(header + 1);
+
+          if (expected_data_ptr == ptr) { // check if slot in use
+            bool is_free = false;
+            free_node_t *free_node = block->free_list;
+
+            while (free_node) {
+              if ((void*)free_node == (void*)header) {
+                is_free = true;
+                break;
+              }
+              free_node = free_node->next;
+            }
+            if (!is_free && simple_gc_is_valid_header(header)) {
+              return header;
+            }
+          }
+
+          return NULL;
+        }
+
+        block = block->next;
+      }
+    }
+
+
+    // search young large blocks
+    large_block_t *large = gen->young_large;
+    while (large) {
+      void *data = (void*)(large->header + 1);
+      if (data == ptr) {
+        return large->header;
+      }
+      large = large->next;
+    }
+  }
+
+  // check old gen pools
   if (gc->use_pools) {
     obj_header_t* header = gc_find_header_in_pools(gc, ptr);
     if (header) return header;
@@ -988,6 +1074,54 @@ void simple_gc_auto_tune(gc_t *gc) {
     float utilization = gc_pool_utilization(sc);
     if (gc->config.auto_expand_pools && utilization > 0.9f) gc_expand_pool(gc, sc);
     if (gc->config.auto_shrink_pools && utilization < 0.2f) gc_shrink_pool(gc, sc);
+  }
+}
+
+bool simple_gc_enable_generations(gc_t *gc, size_t young_size) {
+  if (!gc || !gc->gen_context) return false;
+
+  // default to 20% of heap for young gen
+  if (young_size == 0) young_size = gc->heap_capacity / 5;
+
+  return gc_gen_init(gc, young_size);
+}
+
+void simple_gc_disable_generations(gc_t *gc) {
+  if (!gc) return;
+  gc_gen_destroy(gc);
+}
+
+bool simple_gc_is_generational(gc_t *gc) {
+  return gc_gen_enabled(gc);
+}
+
+void simple_gc_collect_minor(gc_t *gc) {
+  if (!gc) return;
+
+  if (gc_gen_enabled(gc)) {
+    gc_gen_collect_minor(gc);
+  } else {
+    simple_gc_collect(gc);
+  }
+}
+
+void simple_gc_collect_major(gc_t *gc) {
+  if (!gc) return;
+
+  if (gc_gen_enabled(gc)) {
+    gc_gen_collect_major(gc);
+  } else {
+    simple_gc_collect(gc);
+  }
+}
+
+void simple_gc_print_gen_stats(gc_t *gc) {
+  if (!gc) return;
+
+  if (gc_gen_enabled(gc)) {
+    gc_gen_print_stats(gc);
+  } else {
+    printf("Generational GC not enabled\n");
   }
 }
 
