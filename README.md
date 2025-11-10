@@ -16,6 +16,13 @@ make
 make test
 ```
 
+## Running Examples
+
+After building, run:
+
+```bash
+./build/examples/<example_name>_demo
+```
 
 ## Cleaning up
 ```bash

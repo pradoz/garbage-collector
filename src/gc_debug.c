@@ -287,6 +287,30 @@ bool gc_debug_validate_heap(gc_t *gc) {
     }
   }
 
+  // validate card table consistency
+  if (gc->gen_context && gc->gen_context->cardtable.enabled) {
+    gc_cardtable_t *table = &gc->gen_context->cardtable;
+
+    // dirty cards should correspond to old->young
+    ref_node_t *ref = gc->references;
+    while (ref) {
+      obj_header_t *from_header = simple_gc_find_header(gc, ref->from_obj);
+      obj_header_t *to_header = simple_gc_find_header(gc, ref->to_obj);
+
+      if (from_header && to_header) {
+        if (from_header->generation == GC_GEN_OLD && to_header->generation == GC_GEN_YOUNG) {
+          // should have dirty card
+          if (!gc_cardtable_is_dirty(table, ref->from_obj)) {
+            fprintf(stderr, "WARNING: old->young reference without dirty card at %p->%p\n",
+                ref->from_obj, ref->to_obj);
+          }
+        }
+      }
+
+      ref = ref->next;
+    }
+  }
+
   return true;
 }
 

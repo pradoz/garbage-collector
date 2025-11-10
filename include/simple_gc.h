@@ -12,6 +12,7 @@
 #include "gc_mark.h"
 #include "gc_sweep.h"
 #include "gc_generation.h"
+#include "gc_barrier.h"
 #include "gc_trace.h"
 #include "gc_debug.h"
 
@@ -29,6 +30,9 @@ typedef struct reference_node ref_node_t;
 typedef struct relocation_entry relocation_entry_t;
 typedef struct compaction_ctx compaction_ctx_t;
 typedef struct live_obj live_obj_t;
+
+typedef struct gc_gen_context gc_gen_t;
+typedef struct gc_barrier_context gc_barrier_t;
 
 
 // wrappers for backward compatibility
@@ -81,6 +85,9 @@ typedef struct gc_context {
   size_t root_capacity;
   ref_node_t *references;
 
+  gc_gen_t *gen_context;
+  gc_barrier_t *barrier_context;
+
   // stack scanning
   void *stack_bottom;  // highest address (architecture assumption)
   bool auto_root_scan_enabled;
@@ -118,8 +125,6 @@ typedef struct gc_context {
   // trace/debug
   gc_trace_t *trace;
   gc_debug_t *debug;
-
-  gc_gen_t *gen_context;
 } gc_t;
 
 typedef struct reference_node {
@@ -157,6 +162,7 @@ void simple_gc_destroy(gc_t *gc);
 
 // GC stats
 size_t simple_gc_object_count(const gc_t *gc);
+size_t simple_gc_total_object_count(const gc_t *gc);
 size_t simple_gc_heap_capacity(const gc_t *gc);
 size_t simple_gc_heap_used(const gc_t *gc);
 
@@ -211,6 +217,12 @@ bool simple_gc_is_generational(gc_t *gc);
 void simple_gc_collect_minor(gc_t *gc);
 void simple_gc_collect_major(gc_t *gc);
 void simple_gc_print_gen_stats(gc_t *gc);
+
+// write barriers
+bool simple_gc_enable_write_barrier(gc_t *gc);
+void simple_gc_disable_write_barrier(gc_t *gc);
+void simple_gc_write(gc_t *gc, void *from, void *to);
+void simple_gc_print_barrier_stats(gc_t *gc);
 
 // stats
 void simple_gc_get_stats(gc_t *gc, gc_stats_t *stats);

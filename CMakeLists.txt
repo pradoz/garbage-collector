@@ -38,7 +38,15 @@ target_link_libraries(gc_mark PUBLIC gc_common)
 add_library(gc_sweep OBJECT src/gc_sweep.c)
 target_link_libraries(gc_sweep PUBLIC gc_common)
 
-# generation library (depends on types, pool)
+# card table library
+add_library(gc_cardtable OBJECT src/gc_cardtable.c)
+target_link_libraries(gc_cardtable PUBLIC gc_common)
+
+# write barrier library
+add_library(gc_barrier OBJECT src/gc_barrier.c)
+target_link_libraries(gc_barrier PUBLIC gc_common)
+
+# generational GC library (update dependencies)
 add_library(gc_generation OBJECT src/gc_generation.c)
 target_link_libraries(gc_generation PUBLIC gc_common)
 
@@ -68,6 +76,8 @@ add_library(simple_gc
   $<TARGET_OBJECTS:gc_large>
   $<TARGET_OBJECTS:gc_mark>
   $<TARGET_OBJECTS:gc_sweep>
+  $<TARGET_OBJECTS:gc_cardtable>
+  $<TARGET_OBJECTS:gc_barrier>
   $<TARGET_OBJECTS:gc_generation>
   $<TARGET_OBJECTS:gc_trace>
   $<TARGET_OBJECTS:gc_debug>

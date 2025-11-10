@@ -122,6 +122,42 @@ target_include_directories(test_gc_generational PRIVATE
 )
 add_test(NAME test_gc_generational COMMAND test_gc_generational)
 
+# card table tests
+add_executable(test_cardtable
+  test_cardtable.c
+  munit/munit.c
+)
+target_link_libraries(test_cardtable simple_gc)
+target_include_directories(test_cardtable PRIVATE
+  ${CMAKE_SOURCE_DIR}/include
+  munit
+)
+add_test(NAME test_cardtable COMMAND test_cardtable)
+
+# write barrier tests
+add_executable(test_barrier
+  test_barrier.c
+  munit/munit.c
+)
+target_link_libraries(test_barrier simple_gc)
+target_include_directories(test_barrier PRIVATE
+  ${CMAKE_SOURCE_DIR}/include
+  munit
+)
+add_test(NAME test_barrier COMMAND test_barrier)
+
+# generational integration tests
+add_executable(test_gen_integration
+  test_gen_integration.c
+  munit/munit.c
+)
+target_link_libraries(test_gen_integration simple_gc)
+target_include_directories(test_gen_integration PRIVATE
+  ${CMAKE_SOURCE_DIR}/include
+  munit
+)
+
+add_test(NAME test_gen_integration COMMAND test_gen_integration)
 # gc_trace tests
 add_executable(test_gc_trace
   test_trace.c

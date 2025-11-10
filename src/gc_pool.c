@@ -102,6 +102,9 @@ void* gc_pool_alloc_from_block(pool_block_t *block, obj_type_t type, size_t size
     return NULL;
   }
 
+  header->generation = GC_GEN_YOUNG;
+  header->age = 0;
+
   return (void*)(header + 1);
 }
 

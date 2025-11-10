@@ -7,6 +7,7 @@
 #include "gc_types.h"
 #include "gc_pool.h"
 #include "gc_large.h"
+#include "gc_cardtable.h"
 
 
 #define GC_PROMOTION_AGE 3
@@ -39,6 +40,8 @@ typedef struct gc_gen_context {
   size_t young_capacity;
   size_t young_used;
 
+  gc_cardtable_t cardtable;
+
   gc_gen_stats_t stats[GC_GEN_COUNT];
   size_t minor_count;
   size_t major_count;
@@ -47,7 +50,7 @@ typedef struct gc_gen_context {
 
 bool gc_gen_init(gc_t *gc, size_t young_size);
 void gc_gen_destroy(gc_t *gc);
-bool gc_gen_enabled(gc_t *gc);
+bool gc_gen_enabled(const gc_t *gc);
 
 void *gc_gen_alloc(gc_t *gc, obj_type_t type, size_t size);
 

@@ -34,8 +34,16 @@ bool gc_gen_init(gc_t *gc, size_t young_size) {
   gen->major_count= 0;
 
   memset(gen->stats, 0, sizeof(gen->stats));
-  gc->gen_context = gen;
 
+  // don't initialize card table yet - wait until we have heap bounds
+  gen->cardtable.cards = NULL;
+  gen->cardtable.num_cards = 0;
+  gen->cardtable.enabled = false;
+  gen->cardtable.heap_start = NULL;
+  gen->cardtable.heap_end = NULL;
+  gen->cardtable.dirty_count = 0;
+
+  gc->gen_context = gen;
   return true;
 }
 
@@ -46,12 +54,13 @@ void gc_gen_destroy(gc_t *gc) {
 
   gc_pool_destroy_all_classes(gen->young_pools);
   gc_large_destroy_all(gen->young_large);
+  gc_cardtable_destroy(&gen->cardtable);
 
   free(gen);
   gc->gen_context = NULL;
 }
 
-bool gc_gen_enabled(gc_t *gc) {
+bool gc_gen_enabled(const gc_t *gc) {
   return (gc && gc->gen_context && gc->gen_context->enabled);
 }
 
@@ -120,9 +129,18 @@ void *gc_gen_alloc(gc_t *gc, obj_type_t type, size_t size) {
       if (gc->trace) {
         gc_trace_event_t event = {
           .type = GC_EVENT_ALLOC,
-          .data.alloc = {result, size, type, NULL, 0},
+          .data.alloc = {result, size, type, __FILE__, __LINE__},
         };
         gc_trace_event(gc, &event);
+      }
+
+      // update heap bounds
+      if (!gc->heap_start || result < gc->heap_start) {
+        gc->heap_start = result;
+      }
+      void *result_end = (void*)((char*)result + size);
+      if (!gc->heap_end || result_end > gc->heap_end) {
+        gc->heap_end = result_end;
       }
     }
   } else if (size >= GC_LARGE_OBJECT_THRESHOLD && size < GC_HUGE_OBJECT_THRESHOLD) { // young large
@@ -207,11 +225,15 @@ static bool gc_gen_promote_object(gc_t *gc, obj_header_t *header, void *data) {
   if (!promoted) return false;
 
   memcpy(promoted, data, header->size);
+
+  // get the new header and set generation
   obj_header_t *new_header = simple_gc_find_header(gc, promoted);
   if (new_header) {
     new_header->generation = GC_GEN_OLD;
     new_header->age = GC_PROMOTION_AGE;
     new_header->marked = false;
+    new_header->type = header->type;
+    new_header->size = header->size;
   }
 
   // update references to new location
@@ -280,6 +302,36 @@ static bool gc_gen_try_promote(gc_t *gc, gc_gen_t *gen, obj_header_t *header, si
   return false;
 }
 
+static void gc_gen_scan_card(gc_t *gc, void *card_start, void *card_end, void *user_data) {
+  if (!gc || !card_start || !card_end) return;
+
+  (void)user_data;
+
+  // scan all objects in card range
+  obj_header_t *obj = gc->objects;
+  while (obj) {
+    void *obj_ptr = (void *)(obj + 1);
+
+    // check if object is in card range and in old gen
+    if (obj_ptr >= card_start && obj_ptr < card_end && obj->generation == GC_GEN_OLD) {
+      // scan references from this object
+      ref_node_t *ref = gc->references;
+      while (ref) {
+        if (ref->from_obj == obj_ptr) {
+          obj_header_t *to_header = simple_gc_find_header(gc, ref->to_obj);
+          if (to_header && to_header->generation == GC_GEN_YOUNG) {
+            // found old->young reference, mark young object
+            gc_mark_object(gc, ref->to_obj);
+          }
+        }
+        ref = ref->next;
+      }
+    }
+
+    obj = obj->next;
+  }
+}
+
 void gc_gen_collect_minor(gc_t *gc) {
   if (!gc || !gc->gen_context) return;
 
@@ -301,6 +353,10 @@ void gc_gen_collect_minor(gc_t *gc) {
     if (header && header->generation == GC_GEN_YOUNG) {
       header->marked = true;
     }
+  }
+
+  if (gen->cardtable.enabled) {
+    gc_cardtable_scan_dirty(gc, &gen->cardtable, gc_gen_scan_card, NULL);
   }
 
   // mark young objects referenced by old generation
@@ -515,6 +571,10 @@ void gc_gen_collect_minor(gc_t *gc) {
         promoted_count,
         duration);
   }
+
+  if (gc_gen_should_collect_major(gc)) {
+    gc_gen_collect_major(gc);
+  }
 }
 
 void gc_gen_collect_major(gc_t *gc) {
@@ -531,6 +591,10 @@ void gc_gen_collect_major(gc_t *gc) {
   }
 
   simple_gc_collect(gc);
+
+  if (gen->cardtable.enabled) {
+    gc_cardtable_clear(&gen->cardtable);
+  }
 
   clock_t end = clock();
   double duration = (double)(end - start) / CLOCKS_PER_SEC * 1000.0;
@@ -632,7 +696,13 @@ void gc_gen_print_stats(gc_t *gc) {
   printf("  Total time:    %.3f ms\n", gen->stats[GC_GEN_OLD].total_time_ms);
   if (gen->stats[GC_GEN_OLD].collections > 0) {
     printf("  Avg pause:     %.3f ms\n",
-           gen->stats[GC_GEN_OLD].total_time_ms / gen->stats[GC_GEN_OLD].collections);
+        gen->stats[GC_GEN_OLD].total_time_ms / gen->stats[GC_GEN_OLD].collections);
   }
+  printf("\n");
+  if (gen->cardtable.enabled) {
+    gc_cardtable_print_stats(&gen->cardtable);
+  }
+
+  printf("==================================\n\n");
 }
 

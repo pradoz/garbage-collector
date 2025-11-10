@@ -12,6 +12,8 @@
 #include "gc_mark.h"
 #include "gc_sweep.h"
 #include "gc_generation.h"
+#include "gc_cardtable.h"
+#include "gc_barrier.h"
 #include "gc_trace.h"
 #include "gc_debug.h"
 
@@ -103,6 +105,9 @@ bool simple_gc_init(gc_t* gc, size_t init_capacity) {
   gc->heap_used = 0;
   gc->heap_capacity = init_capacity;
 
+  gc->gen_context = NULL;
+  gc->barrier_context = NULL;
+
   // roots
   gc->root_capacity = 16;
   gc->root_count = 0;
@@ -167,6 +172,7 @@ void simple_gc_destroy(gc_t* gc) {
     return;
   }
 
+  if (gc->barrier_context) gc_barrier_destroy(gc);
   if (gc->gen_context) gc_gen_destroy(gc);
 
   // end tracing if active
@@ -218,6 +224,15 @@ size_t simple_gc_object_count(const gc_t* gc) {
   return gc ? gc->object_count : 0;
 }
 
+size_t simple_gc_total_object_count(const gc_t *gc) {
+  if (!gc) return 0;
+  if (gc->gen_context && gc_gen_enabled(gc)) {
+    gc_gen_t *gen = gc->gen_context;
+    return gen->stats[GC_GEN_YOUNG].objects + gen->stats[GC_GEN_OLD].objects;
+  }
+  return gc->object_count;
+}
+
 size_t simple_gc_heap_capacity(const gc_t* gc) {
   return gc ? gc->heap_capacity : 0;
 }
@@ -257,12 +272,18 @@ void *simple_gc_alloc(gc_t *gc, obj_type_t type, size_t size) {
   if (gc->gen_context && gc_gen_enabled(gc)) {
     void *result = gc_gen_alloc(gc, type, size);
     if (result) {
-      /* check if minor collection needed */
+      // bookkeeping for legacy mode
+      gc->allocs_since_collect++;
+      gc->total_allocations++;
+      size_t total_size = sizeof(obj_header_t) + size;
+      gc->total_bytes_allocated += total_size;
+      update_heap_bounds(gc, result, size);
       if (gc_gen_should_collect_minor(gc)) {
         gc_gen_collect_minor(gc);
       }
       return result;
     }
+    return NULL;
   }
 
   clock_t now = clock();
@@ -317,18 +338,13 @@ void *simple_gc_alloc(gc_t *gc, obj_type_t type, size_t size) {
   }
 
 
-  // bookkeeping
+  // bookkeeping for legacy mode
   if (result) {
     GC_TRACE_ALLOC(gc, result, size, type, __FILE__, __LINE__);
-    // memory pressure tracking
     gc->allocs_since_collect++;
-
-    // heap tracking
     gc->object_count++;
     gc->heap_used += total_size;
     update_heap_bounds(gc, result, size);
-
-    // statistics
     gc->total_allocations++;
     gc->total_bytes_allocated += total_size;
   }
@@ -626,6 +642,8 @@ bool simple_gc_add_reference(gc_t *gc, void *from_ptr, void *to_ptr) {
   if (!simple_gc_find_header(gc, from_ptr) || !simple_gc_find_header(gc, to_ptr)) {
     return false;
   }
+
+  if (gc->barrier_context) gc_barrier_write(gc, from_ptr, to_ptr);
 
   ref_node_t* ref = (ref_node_t*) malloc(sizeof(ref_node_t));
   if (!ref) {
@@ -1078,7 +1096,8 @@ void simple_gc_auto_tune(gc_t *gc) {
 }
 
 bool simple_gc_enable_generations(gc_t *gc, size_t young_size) {
-  if (!gc || !gc->gen_context) return false;
+  if (!gc) return false;
+  if (gc->gen_context) return true; // don't re-initialize
 
   // default to 20% of heap for young gen
   if (young_size == 0) young_size = gc->heap_capacity / 5;
@@ -1157,6 +1176,26 @@ void simple_gc_get_stats(gc_t *gc, gc_stats_t *stats) {
   stats->fragmentation_ratio = total_capacity > 0
     ? (float)total_fragmented / (float)total_capacity
     : 0.0f;
+}
+
+bool simple_gc_enable_write_barrier(gc_t *gc) {
+  if (!gc) return false;
+  return gc_barrier_init(gc, GC_BARRIER_CARD_MARKING);
+}
+
+void simple_gc_disable_write_barrier(gc_t *gc) {
+  if (!gc) return;
+  gc_barrier_destroy(gc);
+}
+
+void simple_gc_write(gc_t *gc, void *from, void *to) {
+  if (!gc) return;
+  gc_barrier_write(gc, from, to);
+}
+
+void simple_gc_print_barrier_stats(gc_t *gc) {
+  if (!gc) return;
+  gc_barrier_print_stats(gc);
 }
 
 void simple_gc_print_stats(gc_t *gc) {
