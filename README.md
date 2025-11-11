@@ -1,6 +1,9 @@
 # Simple Garbage Collector
 
+[![C CI](https://github.com/pradoz/garbage-collector/actions/workflows/c.yml/badge.svg)](https://github.com/pradoz/garbage-collector/actions/workflows/c.yml)
+
 A simple mark-and-sweep garbage collector implemented in C.
+
 
 ## Building
 
