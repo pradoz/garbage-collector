@@ -24,12 +24,6 @@ test: build $(addprefix test-,$(subst test_,,$(TESTS)))
 
 test-verbose: build $(addprefix test-,$(addsuffix -verbose,$(subst test_,,$(TESTS))))
 
-example-visualizer: build
-	@./$(BUILD_DIR)/examples/visualizer_demo
-
-example-stack-scan: build
-	@./$(BUILD_DIR)/examples/stack_scan_demo
-
 clean:
 	@rm -rf $(BUILD_DIR)
 	@rm -rf test/CMakeFiles test/cmake_install.cmake test/CTestTestfile.cmake test/Makefile
